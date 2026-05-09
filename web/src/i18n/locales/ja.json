@@ -165,8 +165,8 @@
     "rawConfig": "生の設定"
   },
   "login": {
-    "title": "CC-Connect 管理コンソール",
-    "subtitle": "CC-Connect インスタンスに接続",
+    "title": "\u7384\u661fOps \u7ba1\u7406\u30b3\u30f3\u30bd\u30fc\u30eb",
+    "subtitle": "\u7384\u661fOps \u30a4\u30f3\u30b9\u30bf\u30f3\u30b9\u306b\u63a5\u7d9a",
     "token": "API トークン",
     "serverUrl": "サーバー URL",
     "connect": "接続",

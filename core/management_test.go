@@ -62,6 +62,23 @@ func testManagementServer(t *testing.T, token string) (*ManagementServer, *httpt
 	mux.HandleFunc(prefix+"/providers/", mgmt.wrap(mgmt.handleGlobalProviderRoutes))
 	mux.HandleFunc(prefix+"/skills", mgmt.wrap(mgmt.handleSkills))
 	mux.HandleFunc(prefix+"/skills/presets", mgmt.wrap(mgmt.handleSkillPresets))
+	mux.HandleFunc(prefix+"/enterprise/overview", mgmt.wrap(mgmt.handleEnterpriseOverview))
+	mux.HandleFunc(prefix+"/enterprise/tenants", mgmt.wrap(mgmt.handleEnterpriseTenants))
+	mux.HandleFunc(prefix+"/enterprise/users", mgmt.wrap(mgmt.handleEnterpriseUsers))
+	mux.HandleFunc(prefix+"/enterprise/spaces", mgmt.wrap(mgmt.handleEnterpriseSpaces))
+	mux.HandleFunc(prefix+"/enterprise/skills", mgmt.wrap(mgmt.handleEnterpriseSkills))
+	mux.HandleFunc(prefix+"/enterprise/bots", mgmt.wrap(mgmt.handleEnterpriseBots))
+	mux.HandleFunc(prefix+"/enterprise/providers", mgmt.wrap(mgmt.handleEnterpriseProviders))
+	mux.HandleFunc(prefix+"/enterprise/permissions", mgmt.wrap(mgmt.handleEnterprisePermissions))
+	mux.HandleFunc(prefix+"/enterprise/roles", mgmt.wrap(mgmt.handleEnterpriseRoles))
+	mux.HandleFunc(prefix+"/enterprise/role-bindings", mgmt.wrap(mgmt.handleEnterpriseRoleBindings))
+	mux.HandleFunc(prefix+"/enterprise/effective-access", mgmt.wrap(mgmt.handleEnterpriseEffectiveAccess))
+	mux.HandleFunc(prefix+"/enterprise/projects", mgmt.wrap(mgmt.handleEnterpriseProjects))
+	mux.HandleFunc(prefix+"/enterprise/tasks", mgmt.wrap(mgmt.handleEnterpriseTasks))
+	mux.HandleFunc(prefix+"/enterprise/settings", mgmt.wrap(mgmt.handleEnterpriseSettings))
+	mux.HandleFunc(prefix+"/enterprise/imports", mgmt.wrap(mgmt.handleEnterpriseImports))
+	mux.HandleFunc(prefix+"/enterprise/usage", mgmt.wrap(mgmt.handleEnterpriseUsage))
+	mux.HandleFunc(prefix+"/enterprise/leaderboard", mgmt.wrap(mgmt.handleEnterpriseLeaderboard))
 	mux.HandleFunc(prefix+"/bridge/adapters", mgmt.wrap(mgmt.handleBridgeAdapters))
 
 	ts := httptest.NewServer(mux)
@@ -1505,7 +1522,319 @@ func TestMgmt_SkillPresets_Error(t *testing.T) {
 	}
 }
 
+func TestMgmt_Enterprise_NotConfigured(t *testing.T) {
+	_, ts, _ := testManagementServer(t, "tok")
+	r := mgmtGet(t, ts.URL+"/api/v1/enterprise/overview", "tok")
+	if r.OK {
+		t.Fatal("expected enterprise overview to fail without store")
+	}
+}
+
+func TestMgmt_Enterprise_CRUDAndLeaderboard(t *testing.T) {
+	mgmt, ts, _ := testManagementServer(t, "tok")
+	mgmt.SetEnterpriseStore(NewEnterpriseStore(""))
+
+	tenantResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/tenants", "tok", map[string]any{
+		"name": "Acme AI",
+		"slug": "acme-ai",
+	})
+	if !tenantResp.OK {
+		t.Fatalf("create tenant failed: %s", tenantResp.Error)
+	}
+	var tenant EnterpriseTenant
+	if err := json.Unmarshal(tenantResp.Data, &tenant); err != nil {
+		t.Fatalf("unmarshal tenant: %v", err)
+	}
+
+	userResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/users", "tok", map[string]any{
+		"tenant_id":    tenant.ID,
+		"display_name": "Alice",
+		"email":        "alice@example.com",
+		"role":         "member",
+	})
+	if !userResp.OK {
+		t.Fatalf("create user failed: %s", userResp.Error)
+	}
+	var user EnterpriseUser
+	if err := json.Unmarshal(userResp.Data, &user); err != nil {
+		t.Fatalf("unmarshal user: %v", err)
+	}
+
+	spaceResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/spaces", "tok", map[string]any{
+		"tenant_id":     tenant.ID,
+		"owner_user_id": user.ID,
+		"name":          "Alice Workspace",
+		"workspace_dir": "D:\\tenant-data\\acme\\alice",
+		"project_name":  "claude-enterprise",
+	})
+	if !spaceResp.OK {
+		t.Fatalf("create space failed: %s", spaceResp.Error)
+	}
+	var space EnterpriseSpace
+	if err := json.Unmarshal(spaceResp.Data, &space); err != nil {
+		t.Fatalf("unmarshal space: %v", err)
+	}
+
+	providerResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/providers", "tok", map[string]any{
+		"name":          "deepseek",
+		"display_name":  "DeepSeek",
+		"provider_type": "openai-compatible",
+		"default_model": "deepseek-chat",
+		"models":        []string{"deepseek-chat", "deepseek-reasoner"},
+	})
+	if !providerResp.OK {
+		t.Fatalf("create provider failed: %s", providerResp.Error)
+	}
+
+	skillResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/skills", "tok", map[string]any{
+		"tenant_id":     tenant.ID,
+		"owner_user_id": user.ID,
+		"name":          "weekly-report",
+		"display_name":  "Weekly Report",
+		"description":   "Generate a team weekly report",
+		"scope":         "tenant",
+		"status":        "published",
+		"version":       "1.0.0",
+	})
+	if !skillResp.OK {
+		t.Fatalf("create skill failed: %s", skillResp.Error)
+	}
+
+	usageResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/usage", "tok", map[string]any{
+		"tenant_id":         tenant.ID,
+		"user_id":           user.ID,
+		"space_id":          space.ID,
+		"provider_name":     "deepseek",
+		"model_name":        "deepseek-chat",
+		"prompt_tokens":     120,
+		"completion_tokens": 80,
+		"total_tokens":      200,
+		"cost_micros":       3500,
+		"request_kind":      "chat",
+	})
+	if !usageResp.OK {
+		t.Fatalf("create usage failed: %s", usageResp.Error)
+	}
+
+	overviewResp := mgmtGet(t, ts.URL+"/api/v1/enterprise/overview", "tok")
+	if !overviewResp.OK {
+		t.Fatalf("enterprise overview failed: %s", overviewResp.Error)
+	}
+	var overview EnterpriseOverview
+	if err := json.Unmarshal(overviewResp.Data, &overview); err != nil {
+		t.Fatalf("unmarshal overview: %v", err)
+	}
+	if overview.TenantsCount != 1 || overview.UsersCount != 1 || overview.SpacesCount != 1 {
+		t.Fatalf("unexpected overview counts: %+v", overview)
+	}
+	if overview.TotalTokens != 200 {
+		t.Fatalf("total tokens = %d, want 200", overview.TotalTokens)
+	}
+
+	leaderboardResp := mgmtGet(t, ts.URL+"/api/v1/enterprise/leaderboard?group_by=user", "tok")
+	if !leaderboardResp.OK {
+		t.Fatalf("enterprise leaderboard failed: %s", leaderboardResp.Error)
+	}
+	var leaderboard struct {
+		GroupBy     string                       `json:"group_by"`
+		Leaderboard []EnterpriseLeaderboardEntry `json:"leaderboard"`
+	}
+	if err := json.Unmarshal(leaderboardResp.Data, &leaderboard); err != nil {
+		t.Fatalf("unmarshal leaderboard: %v", err)
+	}
+	if len(leaderboard.Leaderboard) != 1 {
+		t.Fatalf("leaderboard rows = %d, want 1", len(leaderboard.Leaderboard))
+	}
+	if leaderboard.Leaderboard[0].Tokens != 200 {
+		t.Fatalf("leaderboard tokens = %d, want 200", leaderboard.Leaderboard[0].Tokens)
+	}
+}
+
 // ── Cron PATCH (update job) ──
+
+func TestMgmt_Enterprise_RBACAndProjects(t *testing.T) {
+	mgmt, ts, _ := testManagementServer(t, "tok")
+	mgmt.SetEnterpriseStore(NewEnterpriseStore(""))
+
+	tenantResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/tenants", "tok", map[string]any{
+		"name": "Ops Tenant",
+	})
+	if !tenantResp.OK {
+		t.Fatalf("create tenant failed: %s", tenantResp.Error)
+	}
+	var tenant EnterpriseTenant
+	if err := json.Unmarshal(tenantResp.Data, &tenant); err != nil {
+		t.Fatalf("unmarshal tenant: %v", err)
+	}
+
+	userResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/users", "tok", map[string]any{
+		"tenant_id":    tenant.ID,
+		"display_name": "Bob",
+	})
+	if !userResp.OK {
+		t.Fatalf("create user failed: %s", userResp.Error)
+	}
+	var user EnterpriseUser
+	if err := json.Unmarshal(userResp.Data, &user); err != nil {
+		t.Fatalf("unmarshal user: %v", err)
+	}
+
+	roleResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/roles", "tok", map[string]any{
+		"tenant_id":      tenant.ID,
+		"name":           "Space Admin",
+		"scope":          "tenant",
+		"status":         "active",
+		"permission_ids": []string{"space:view", "space:manage", "project:manage", "role:view"},
+	})
+	if !roleResp.OK {
+		t.Fatalf("create role failed: %s", roleResp.Error)
+	}
+	var role EnterpriseRole
+	if err := json.Unmarshal(roleResp.Data, &role); err != nil {
+		t.Fatalf("unmarshal role: %v", err)
+	}
+
+	projectResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/projects", "tok", map[string]any{
+		"tenant_id":     tenant.ID,
+		"owner_user_id": user.ID,
+		"name":          "ops-runtime",
+		"workspace_dir": "D:\\ops\\runtime",
+		"agent_type":    "claudecode",
+		"agent_options": map[string]any{"work_dir": "D:\\ops\\runtime", "mode": "default"},
+		"platforms": []map[string]any{
+			{"type": "feishu"},
+		},
+	})
+	if !projectResp.OK {
+		t.Fatalf("create project failed: %s", projectResp.Error)
+	}
+	var project EnterpriseProjectProfile
+	if err := json.Unmarshal(projectResp.Data, &project); err != nil {
+		t.Fatalf("unmarshal project: %v", err)
+	}
+
+	bindingResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/role-bindings", "tok", map[string]any{
+		"tenant_id":  tenant.ID,
+		"role_id":    role.ID,
+		"user_id":    user.ID,
+		"project_id": project.ID,
+		"scope":      "project",
+		"status":     "active",
+	})
+	if !bindingResp.OK {
+		t.Fatalf("create binding failed: %s", bindingResp.Error)
+	}
+
+	permResp := mgmtGet(t, ts.URL+"/api/v1/enterprise/permissions", "tok")
+	if !permResp.OK {
+		t.Fatalf("list permissions failed: %s", permResp.Error)
+	}
+	var perms struct {
+		Permissions []EnterprisePermission `json:"permissions"`
+	}
+	if err := json.Unmarshal(permResp.Data, &perms); err != nil {
+		t.Fatalf("unmarshal permissions: %v", err)
+	}
+	if len(perms.Permissions) == 0 {
+		t.Fatal("expected builtin permissions")
+	}
+
+	accessResp := mgmtGet(t, ts.URL+"/api/v1/enterprise/effective-access?tenant_id="+tenant.ID+"&user_id="+user.ID+"&project_id="+project.ID, "tok")
+	if !accessResp.OK {
+		t.Fatalf("resolve access failed: %s", accessResp.Error)
+	}
+	var access EnterpriseAccessProfile
+	if err := json.Unmarshal(accessResp.Data, &access); err != nil {
+		t.Fatalf("unmarshal access: %v", err)
+	}
+	if len(access.RoleIDs) != 1 {
+		t.Fatalf("role ids = %v, want 1", access.RoleIDs)
+	}
+	if len(access.PermissionIDs) == 0 {
+		t.Fatal("expected resolved permissions")
+	}
+
+	projectListResp := mgmtGet(t, ts.URL+"/api/v1/enterprise/projects?tenant_id="+tenant.ID, "tok")
+	if !projectListResp.OK {
+		t.Fatalf("list projects failed: %s", projectListResp.Error)
+	}
+	var projects struct {
+		Projects []EnterpriseProjectProfile `json:"projects"`
+	}
+	if err := json.Unmarshal(projectListResp.Data, &projects); err != nil {
+		t.Fatalf("unmarshal projects: %v", err)
+	}
+	if len(projects.Projects) != 1 {
+		t.Fatalf("projects = %d, want 1", len(projects.Projects))
+	}
+}
+
+func TestMgmt_Enterprise_Tasks(t *testing.T) {
+	mgmt, ts, _ := testManagementServer(t, "tok")
+	mgmt.SetEnterpriseStore(NewEnterpriseStore(""))
+
+	tenantResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/tenants", "tok", map[string]any{
+		"name": "Task Tenant",
+	})
+	if !tenantResp.OK {
+		t.Fatalf("create tenant failed: %s", tenantResp.Error)
+	}
+	var tenant EnterpriseTenant
+	if err := json.Unmarshal(tenantResp.Data, &tenant); err != nil {
+		t.Fatalf("unmarshal tenant: %v", err)
+	}
+
+	userResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/users", "tok", map[string]any{
+		"tenant_id":    tenant.ID,
+		"display_name": "Task Owner",
+	})
+	if !userResp.OK {
+		t.Fatalf("create user failed: %s", userResp.Error)
+	}
+	var user EnterpriseUser
+	if err := json.Unmarshal(userResp.Data, &user); err != nil {
+		t.Fatalf("unmarshal user: %v", err)
+	}
+
+	taskResp := mgmtPost(t, ts.URL+"/api/v1/enterprise/tasks", "tok", map[string]any{
+		"tenant_id":        tenant.ID,
+		"owner_user_id":    user.ID,
+		"assignee_user_id": user.ID,
+		"title":            "Follow up production alert",
+		"description":      "Check alert noise and report status",
+		"task_type":        "task",
+		"priority":         "high",
+		"status":           "todo",
+		"tags":             []string{"alert", "ops"},
+	})
+	if !taskResp.OK {
+		t.Fatalf("create task failed: %s", taskResp.Error)
+	}
+	var task EnterpriseTask
+	if err := json.Unmarshal(taskResp.Data, &task); err != nil {
+		t.Fatalf("unmarshal task: %v", err)
+	}
+	if task.ID == "" {
+		t.Fatal("expected task id")
+	}
+
+	taskListResp := mgmtGet(t, ts.URL+"/api/v1/enterprise/tasks?tenant_id="+tenant.ID+"&priority=high", "tok")
+	if !taskListResp.OK {
+		t.Fatalf("list tasks failed: %s", taskListResp.Error)
+	}
+	var tasks struct {
+		Tasks []EnterpriseTask `json:"tasks"`
+	}
+	if err := json.Unmarshal(taskListResp.Data, &tasks); err != nil {
+		t.Fatalf("unmarshal tasks: %v", err)
+	}
+	if len(tasks.Tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(tasks.Tasks))
+	}
+	if tasks.Tasks[0].Title != "Follow up production alert" {
+		t.Fatalf("task title = %q", tasks.Tasks[0].Title)
+	}
+}
 
 func TestMgmt_CronPatch(t *testing.T) {
 	mgmt, ts, e := testManagementServer(t, "tok")

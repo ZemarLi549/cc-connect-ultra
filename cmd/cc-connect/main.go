@@ -799,6 +799,7 @@ func main() {
 
 	// Start management API server if enabled
 	var mgmtSrv *core.ManagementServer
+	var enterpriseStore core.EnterpriseDataStore
 	if cfg.Management.Enabled != nil && *cfg.Management.Enabled {
 		port := cfg.Management.Port
 		if port <= 0 {
@@ -882,6 +883,32 @@ func main() {
 		mgmtSrv.SetGetProjectConfig(config.GetProjectConfigDetails)
 		mgmtSrv.SetSaveProviderRefs(config.SaveProviderRefs)
 		mgmtSrv.SetConfigFilePath(configPath)
+		enterpriseStore, err = core.NewEnterpriseDataStore(core.EnterpriseStoreOptions{
+			FilePath: filepath.Join(cfg.DataDir, "enterprise.json"),
+			Postgres: core.EnterpriseSQLConfig{
+				Driver:              "postgres",
+				DSN:                 cfg.AIOps.Postgres.DSN,
+				MaxOpenConns:        cfg.AIOps.Postgres.MaxOpenConns,
+				MaxIdleConns:        cfg.AIOps.Postgres.MaxIdleConns,
+				ConnMaxLifetimeSecs: cfg.AIOps.Postgres.ConnMaxLifetimeSecs,
+			},
+			Redis: core.EnterpriseRedisConfig{
+				Addr:      cfg.AIOps.Redis.Addr,
+				Password:  cfg.AIOps.Redis.Password,
+				DB:        cfg.AIOps.Redis.DB,
+				KeyPrefix: cfg.AIOps.Redis.KeyPrefix,
+			},
+			SeedSettings: enterpriseSettingsFromConfig(cfg),
+		})
+		if err != nil {
+			slog.Error("enterprise store init failed", "error", err)
+			os.Exit(1)
+		}
+		if err := enterpriseStore.SyncProjects(buildEnterpriseProjectProfiles(cfg.Projects)); err != nil {
+			slog.Error("enterprise project sync failed", "error", err)
+			os.Exit(1)
+		}
+		mgmtSrv.SetEnterpriseStore(enterpriseStore)
 		mgmtSrv.SetGetGlobalSettings(config.GetGlobalSettings)
 		mgmtSrv.SetSaveGlobalSettings(func(updates map[string]any) error {
 			u := config.GlobalSettingsUpdate{}
@@ -1032,6 +1059,11 @@ func main() {
 	}
 	if apiSrv != nil {
 		apiSrv.Stop()
+	}
+	if enterpriseStore != nil {
+		if err := enterpriseStore.Close(); err != nil {
+			slog.Warn("enterprise store close failed", "error", err)
+		}
 	}
 	for _, e := range engines {
 		if err := e.Stop(); err != nil {
@@ -1674,4 +1706,107 @@ func derefInt(v *int) int {
 		return 0
 	}
 	return *v
+}
+
+func enterpriseSettingsFromConfig(cfg *config.Config) core.EnterpriseAIOpsSettings {
+	settings := core.EnterpriseAIOpsSettings{
+		OrganizationName:    cfg.AIOps.OrganizationName,
+		DefaultProjectName:  cfg.AIOps.DefaultProjectName,
+		DefaultSpaceBaseDir: cfg.AIOps.WorkspaceBaseDir,
+		Postgres: core.EnterpriseSQLConfig{
+			Driver:              "postgres",
+			DSN:                 cfg.AIOps.Postgres.DSN,
+			MaxOpenConns:        cfg.AIOps.Postgres.MaxOpenConns,
+			MaxIdleConns:        cfg.AIOps.Postgres.MaxIdleConns,
+			ConnMaxLifetimeSecs: cfg.AIOps.Postgres.ConnMaxLifetimeSecs,
+		},
+		Redis: core.EnterpriseRedisConfig{
+			Addr:      cfg.AIOps.Redis.Addr,
+			Password:  cfg.AIOps.Redis.Password,
+			DB:        cfg.AIOps.Redis.DB,
+			KeyPrefix: cfg.AIOps.Redis.KeyPrefix,
+		},
+		Cocoloop: core.EnterpriseCocoloopConfig{
+			BaseURL:   cfg.AIOps.Cocoloop.BaseURL,
+			APIKey:    cfg.AIOps.Cocoloop.APIKey,
+			Workspace: cfg.AIOps.Cocoloop.Workspace,
+		},
+	}
+	if cfg.AIOps.Cocoloop.Enabled != nil {
+		settings.Cocoloop.Enabled = *cfg.AIOps.Cocoloop.Enabled
+	}
+	return settings
+}
+
+func buildEnterpriseProjectProfiles(projects []config.ProjectConfig) []core.EnterpriseProjectProfile {
+	out := make([]core.EnterpriseProjectProfile, 0, len(projects))
+	for _, project := range projects {
+		workspaceDir, _ := project.Agent.Options["work_dir"].(string)
+		mode := project.Mode
+		if mode == "" {
+			if v, ok := project.Agent.Options["mode"].(string); ok {
+				mode = v
+			}
+		}
+		providers := make([]core.EnterpriseProjectProviderConfig, 0, len(project.Agent.Providers))
+		for _, provider := range project.Agent.Providers {
+			providers = append(providers, core.EnterpriseProjectProviderConfig{
+				Name:        provider.Name,
+				BaseURL:     provider.BaseURL,
+				Model:       provider.Model,
+				Thinking:    provider.Thinking,
+				AgentTypes:  append([]string(nil), provider.AgentTypes...),
+				Endpoints:   cloneStringMap(provider.Endpoints),
+				AgentModels: cloneStringMap(provider.AgentModels),
+			})
+		}
+		platforms := make([]core.EnterpriseProjectPlatformConfig, 0, len(project.Platforms))
+		for _, platform := range project.Platforms {
+			platforms = append(platforms, core.EnterpriseProjectPlatformConfig{
+				Type:    platform.Type,
+				Options: cloneAnyMap(platform.Options),
+			})
+		}
+		out = append(out, core.EnterpriseProjectProfile{
+			ID:           "",
+			Name:         project.Name,
+			Slug:         "",
+			Source:       "config",
+			WorkspaceDir: workspaceDir,
+			BaseDir:      project.BaseDir,
+			Mode:         mode,
+			AgentType:    project.Agent.Type,
+			AgentOptions: cloneAnyMap(project.Agent.Options),
+			ProviderRefs: append([]string(nil), project.Agent.ProviderRefs...),
+			Providers:    providers,
+			Platforms:    platforms,
+			Status:       "active",
+			Metadata: map[string]string{
+				"admin_from": project.AdminFrom,
+			},
+		})
+	}
+	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

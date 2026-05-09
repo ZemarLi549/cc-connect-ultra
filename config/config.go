@@ -108,6 +108,7 @@ type Config struct {
 	Webhook           WebhookConfig           `toml:"webhook"`
 	Bridge            BridgeConfig            `toml:"bridge"`
 	Management        ManagementConfig        `toml:"management"`
+	AIOps             AIOpsConfig             `toml:"aiops"`
 	Hooks             []HookConfig            `toml:"hooks"`
 	IdleTimeoutMins   *int                    `toml:"idle_timeout_mins,omitempty"` // max minutes between agent events; 0 = no timeout; default 120
 }
@@ -156,6 +157,38 @@ type ManagementConfig struct {
 	Port        int      `toml:"port,omitempty"`         // listen port; default 9820
 	Token       string   `toml:"token,omitempty"`        // shared secret for authentication; required
 	CORSOrigins []string `toml:"cors_origins,omitempty"` // allowed CORS origins; empty = no CORS
+}
+
+// AIOpsConfig holds enterprise AIOps system settings.
+type AIOpsConfig struct {
+	Enabled            *bool               `toml:"enabled"`
+	OrganizationName   string              `toml:"organization_name,omitempty"`
+	DefaultProjectName string              `toml:"default_project_name,omitempty"`
+	WorkspaceBaseDir   string              `toml:"workspace_base_dir,omitempty"`
+	Postgres           AIOpsPostgresConfig `toml:"postgres"`
+	Redis              AIOpsRedisConfig    `toml:"redis"`
+	Cocoloop           CocoloopConfig      `toml:"cocoloop"`
+}
+
+type AIOpsPostgresConfig struct {
+	DSN                 string `toml:"dsn,omitempty"`
+	MaxOpenConns        int    `toml:"max_open_conns,omitempty"`
+	MaxIdleConns        int    `toml:"max_idle_conns,omitempty"`
+	ConnMaxLifetimeSecs int    `toml:"conn_max_lifetime_secs,omitempty"`
+}
+
+type AIOpsRedisConfig struct {
+	Addr      string `toml:"addr,omitempty"`
+	Password  string `toml:"password,omitempty"`
+	DB        int    `toml:"db,omitempty"`
+	KeyPrefix string `toml:"key_prefix,omitempty"`
+}
+
+type CocoloopConfig struct {
+	Enabled   *bool  `toml:"enabled"`
+	BaseURL   string `toml:"base_url,omitempty"`
+	APIKey    string `toml:"api_key,omitempty"`
+	Workspace string `toml:"workspace,omitempty"`
 }
 
 // DisplayConfig controls how intermediate messages (thinking, tool output) are shown.

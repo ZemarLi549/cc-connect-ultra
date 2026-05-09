@@ -64,6 +64,7 @@ type ManagementServer struct {
 	removeGlobalProvider func(name string) error
 	fetchPresets         func() (*ProviderPresetsResponse, error)
 	fetchSkillPresets    func() (*SkillPresetsResponse, error)
+	enterpriseStore      EnterpriseDataStore
 
 	// cc-switch migration callback
 	listCCSwitchProviders func() ([]CCSwitchProviderInfo, error)
@@ -141,10 +142,10 @@ type GlobalProviderInfo struct {
 		Model string `json:"model"`
 		Alias string `json:"alias,omitempty"`
 	} `json:"models,omitempty"`
-	Endpoints       map[string]string              `json:"endpoints,omitempty"`
-	AgentModels     map[string]string              `json:"agent_models,omitempty"`
-	AgentModelLists map[string][]GlobalModelEntry   `json:"agent_model_lists,omitempty"`
-	Codex           *GlobalCodexConfig              `json:"codex,omitempty"`
+	Endpoints       map[string]string             `json:"endpoints,omitempty"`
+	AgentModels     map[string]string             `json:"agent_models,omitempty"`
+	AgentModelLists map[string][]GlobalModelEntry `json:"agent_model_lists,omitempty"`
+	Codex           *GlobalCodexConfig            `json:"codex,omitempty"`
 }
 
 // GlobalModelEntry is a model entry inside AgentModelLists.
@@ -176,6 +177,9 @@ func (m *ManagementServer) SetFetchPresets(fn func() (*ProviderPresetsResponse, 
 }
 func (m *ManagementServer) SetFetchSkillPresets(fn func() (*SkillPresetsResponse, error)) {
 	m.fetchSkillPresets = fn
+}
+func (m *ManagementServer) SetEnterpriseStore(store EnterpriseDataStore) {
+	m.enterpriseStore = store
 }
 func (m *ManagementServer) SetListCCSwitchProviders(fn func() ([]CCSwitchProviderInfo, error)) {
 	m.listCCSwitchProviders = fn
@@ -243,6 +247,23 @@ func (m *ManagementServer) buildHandler(mux *http.ServeMux) http.Handler {
 	// Skills
 	mux.HandleFunc(prefix+"/skills", m.wrap(m.handleSkills))
 	mux.HandleFunc(prefix+"/skills/presets", m.wrap(m.handleSkillPresets))
+	mux.HandleFunc(prefix+"/enterprise/overview", m.wrap(m.handleEnterpriseOverview))
+	mux.HandleFunc(prefix+"/enterprise/tenants", m.wrap(m.handleEnterpriseTenants))
+	mux.HandleFunc(prefix+"/enterprise/users", m.wrap(m.handleEnterpriseUsers))
+	mux.HandleFunc(prefix+"/enterprise/spaces", m.wrap(m.handleEnterpriseSpaces))
+	mux.HandleFunc(prefix+"/enterprise/skills", m.wrap(m.handleEnterpriseSkills))
+	mux.HandleFunc(prefix+"/enterprise/bots", m.wrap(m.handleEnterpriseBots))
+	mux.HandleFunc(prefix+"/enterprise/providers", m.wrap(m.handleEnterpriseProviders))
+	mux.HandleFunc(prefix+"/enterprise/permissions", m.wrap(m.handleEnterprisePermissions))
+	mux.HandleFunc(prefix+"/enterprise/roles", m.wrap(m.handleEnterpriseRoles))
+	mux.HandleFunc(prefix+"/enterprise/role-bindings", m.wrap(m.handleEnterpriseRoleBindings))
+	mux.HandleFunc(prefix+"/enterprise/effective-access", m.wrap(m.handleEnterpriseEffectiveAccess))
+	mux.HandleFunc(prefix+"/enterprise/projects", m.wrap(m.handleEnterpriseProjects))
+	mux.HandleFunc(prefix+"/enterprise/tasks", m.wrap(m.handleEnterpriseTasks))
+	mux.HandleFunc(prefix+"/enterprise/settings", m.wrap(m.handleEnterpriseSettings))
+	mux.HandleFunc(prefix+"/enterprise/imports", m.wrap(m.handleEnterpriseImports))
+	mux.HandleFunc(prefix+"/enterprise/usage", m.wrap(m.handleEnterpriseUsage))
+	mux.HandleFunc(prefix+"/enterprise/leaderboard", m.wrap(m.handleEnterpriseLeaderboard))
 
 	// Bridge
 	mux.HandleFunc(prefix+"/bridge/adapters", m.wrap(m.handleBridgeAdapters))
@@ -1859,10 +1880,10 @@ func (m *ManagementServer) handleCCSwitchProviders(w http.ResponseWriter, r *htt
 // applying per-agent-type overrides for base_url, model, and models.
 func resolveGlobalProviderForAgent(g GlobalProviderInfo, agentType string) ProviderConfig {
 	pc := ProviderConfig{
-		Name:   g.Name,
-		APIKey: g.APIKey,
+		Name:    g.Name,
+		APIKey:  g.APIKey,
 		BaseURL: g.BaseURL,
-		Model:  g.Model,
+		Model:   g.Model,
 	}
 	if ep, ok := g.Endpoints[agentType]; ok && ep != "" {
 		pc.BaseURL = ep
@@ -1947,4 +1968,463 @@ func (m *ManagementServer) handleSkillPresets(w http.ResponseWriter, r *http.Req
 		return
 	}
 	mgmtJSON(w, http.StatusOK, data)
+}
+
+func (m *ManagementServer) enterpriseStoreOrNil() EnterpriseDataStore {
+	return m.enterpriseStore
+}
+
+func (m *ManagementServer) handleEnterpriseOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		mgmtError(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	mgmtJSON(w, http.StatusOK, store.Overview())
+}
+
+func (m *ManagementServer) handleEnterpriseTenants(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		mgmtJSON(w, http.StatusOK, map[string]any{"tenants": store.ListTenants()})
+	case http.MethodPost:
+		var req EnterpriseTenant
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertTenant(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseUsers(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		tenantID := r.URL.Query().Get("tenant_id")
+		mgmtJSON(w, http.StatusOK, map[string]any{"users": store.ListUsers(tenantID)})
+	case http.MethodPost:
+		var req EnterpriseUser
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertUser(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseSpaces(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		tenantID := r.URL.Query().Get("tenant_id")
+		ownerUserID := r.URL.Query().Get("owner_user_id")
+		mgmtJSON(w, http.StatusOK, map[string]any{"spaces": store.ListSpaces(tenantID, ownerUserID)})
+	case http.MethodPost:
+		var req EnterpriseSpace
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertSpace(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseSkills(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		scope := r.URL.Query().Get("scope")
+		tenantID := r.URL.Query().Get("tenant_id")
+		ownerUserID := r.URL.Query().Get("owner_user_id")
+		mgmtJSON(w, http.StatusOK, map[string]any{"skills": store.ListSkills(scope, tenantID, ownerUserID)})
+	case http.MethodPost:
+		var req EnterpriseSkill
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertSkill(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseBots(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		tenantID := r.URL.Query().Get("tenant_id")
+		ownerUserID := r.URL.Query().Get("owner_user_id")
+		mgmtJSON(w, http.StatusOK, map[string]any{"bots": store.ListBots(tenantID, ownerUserID)})
+	case http.MethodPost:
+		var req EnterpriseBot
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertBot(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseProviders(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		mgmtJSON(w, http.StatusOK, map[string]any{"providers": store.ListProviders()})
+	case http.MethodPost:
+		var req EnterpriseProvider
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertProvider(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterprisePermissions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		mgmtError(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	mgmtJSON(w, http.StatusOK, map[string]any{"permissions": store.ListPermissions()})
+}
+
+func (m *ManagementServer) handleEnterpriseRoles(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		tenantID := r.URL.Query().Get("tenant_id")
+		scope := r.URL.Query().Get("scope")
+		mgmtJSON(w, http.StatusOK, map[string]any{"roles": store.ListRoles(tenantID, scope)})
+	case http.MethodPost:
+		var req EnterpriseRole
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertRole(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseRoleBindings(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		filter := EnterpriseRoleBindingFilter{
+			TenantID:  r.URL.Query().Get("tenant_id"),
+			UserID:    r.URL.Query().Get("user_id"),
+			SpaceID:   r.URL.Query().Get("space_id"),
+			ProjectID: r.URL.Query().Get("project_id"),
+			Scope:     r.URL.Query().Get("scope"),
+		}
+		mgmtJSON(w, http.StatusOK, map[string]any{"bindings": store.ListRoleBindings(filter)})
+	case http.MethodPost:
+		var req EnterpriseRoleBinding
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertRoleBinding(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseEffectiveAccess(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		mgmtError(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	req := EnterpriseAccessRequest{
+		TenantID:  r.URL.Query().Get("tenant_id"),
+		UserID:    r.URL.Query().Get("user_id"),
+		SpaceID:   r.URL.Query().Get("space_id"),
+		ProjectID: r.URL.Query().Get("project_id"),
+	}
+	item, err := store.ResolveAccess(req)
+	if err != nil {
+		mgmtError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	mgmtJSON(w, http.StatusOK, item)
+}
+
+func (m *ManagementServer) handleEnterpriseProjects(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		tenantID := r.URL.Query().Get("tenant_id")
+		spaceID := r.URL.Query().Get("space_id")
+		mgmtJSON(w, http.StatusOK, map[string]any{"projects": store.ListProjects(tenantID, spaceID)})
+	case http.MethodPost:
+		var req EnterpriseProjectProfile
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertProject(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseTasks(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		filter := EnterpriseTaskFilter{
+			TenantID:       r.URL.Query().Get("tenant_id"),
+			SpaceID:        r.URL.Query().Get("space_id"),
+			OwnerUserID:    r.URL.Query().Get("owner_user_id"),
+			AssigneeUserID: r.URL.Query().Get("assignee_user_id"),
+			TaskType:       r.URL.Query().Get("task_type"),
+			Status:         r.URL.Query().Get("status"),
+			Priority:       r.URL.Query().Get("priority"),
+			Tag:            r.URL.Query().Get("tag"),
+			Query:          r.URL.Query().Get("q"),
+		}
+		mgmtJSON(w, http.StatusOK, map[string]any{"tasks": store.ListTasks(filter)})
+	case http.MethodPost:
+		var req EnterpriseTask
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.UpsertTask(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseSettings(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		mgmtJSON(w, http.StatusOK, store.GetSettings())
+	case http.MethodPost:
+		var req EnterpriseAIOpsSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.SaveSettings(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseImports(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		tenantID := r.URL.Query().Get("tenant_id")
+		mgmtJSON(w, http.StatusOK, map[string]any{"imports": store.ListImports(tenantID)})
+	case http.MethodPost:
+		var req EnterpriseSkillImportRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.AddImport(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseUsage(w http.ResponseWriter, r *http.Request) {
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		limit := 50
+		if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		filter := EnterpriseUsageFilter{
+			TenantID: r.URL.Query().Get("tenant_id"),
+			UserID:   r.URL.Query().Get("user_id"),
+			SpaceID:  r.URL.Query().Get("space_id"),
+			Provider: r.URL.Query().Get("provider"),
+			Limit:    limit,
+		}
+		mgmtJSON(w, http.StatusOK, map[string]any{"usage": store.ListUsage(filter)})
+	case http.MethodPost:
+		var req EnterpriseUsageRecord
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			mgmtError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		item, err := store.AddUsage(req)
+		if err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		mgmtJSON(w, http.StatusOK, item)
+	default:
+		mgmtError(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (m *ManagementServer) handleEnterpriseLeaderboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		mgmtError(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	store := m.enterpriseStoreOrNil()
+	if store == nil {
+		mgmtError(w, http.StatusNotImplemented, "enterprise store not configured")
+		return
+	}
+	groupBy := strings.TrimSpace(r.URL.Query().Get("group_by"))
+	limit := 20
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	mgmtJSON(w, http.StatusOK, map[string]any{
+		"group_by":    groupBy,
+		"leaderboard": store.Leaderboard(groupBy, limit),
+	})
 }

@@ -165,8 +165,8 @@
     "rawConfig": "Config. sin procesar"
   },
   "login": {
-    "title": "CC-Connect Admin",
-    "subtitle": "Conéctese a su instancia de CC-Connect",
+    "title": "\u7384\u661fOps Admin",
+    "subtitle": "Con\u00e9ctese a su instancia de \u7384\u661fOps",
     "token": "Token de API",
     "serverUrl": "URL del servidor",
     "connect": "Conectar",
