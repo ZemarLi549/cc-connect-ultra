@@ -151,6 +151,12 @@ enable_feishu_card = false
 - 新增项目后列表不显示
   - 通常是服务未重启或未触发 reload。先保存配置，再重启 `cc-connect`。
 
+## 通用agent预先安装
+参考安装指南：`docs/通用agent安装.md`
+
+## 二进制启动部署
+config.toml 中token = "xuan666"  初始登录token默认为xuan666, release 下载二进制包，config.toml放同一目录启动即可
+
 ## 文档导航
 
 - 使用说明：`docs/usage.md`
@@ -158,7 +164,14 @@ enable_feishu_card = false
 - 管理 API：`docs/management-api.md`
 - 平台协议桥接：`docs/bridge-protocol.md`
 
+## 项目截图
+
+![登录](docs/images/登录.png)
+![项目](docs/images/项目.png)
+![添加平台](docs/images/添加平台.png)
+![技能](docs/images/技能.png)
+![重启](docs/images/重启.png)
+
 ## License
 
 MIT
-

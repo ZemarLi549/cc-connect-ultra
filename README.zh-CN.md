@@ -7,3 +7,8 @@ go run ./cmd/cc-connect --config .\config.toml
 <!-- go run -tags no_web -->
 
 ### 添加dify 对话支持
+
+
+### 打包
+go build -o ./dist/xuan-connect.exe ./cmd/cc-connect
+go build -o ./dist/xuan-connect ./cmd/cc-connect
