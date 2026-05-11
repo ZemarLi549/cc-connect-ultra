@@ -197,16 +197,18 @@ type Engine struct {
 	userRoles    *UserRoleManager // nil = legacy mode (no per-user policies)
 	userRolesMu  sync.RWMutex     // protects userRoles, disabledCmds, and adminFrom
 
-	rateLimiter      *RateLimiter
-	outgoingRL       *OutgoingRateLimiter
-	streamPreview    StreamPreviewCfg
-	references       ReferenceRenderCfg
-	relayManager     *RelayManager
-	eventIdleTimeout time.Duration
+	rateLimiter       *RateLimiter
+	outgoingRL        *OutgoingRateLimiter
+	streamPreview     StreamPreviewCfg
+	references        ReferenceRenderCfg
+	relayManager      *RelayManager
+	chatProjectRouter *ChatProjectRouter
+	messageDeduper    *MessageDeduper
+	eventIdleTimeout  time.Duration
 	maxQueuedMessages int
-	dirHistory       *DirHistory
-	baseWorkDir      string
-	projectState     *ProjectStateStore
+	dirHistory        *DirHistory
+	baseWorkDir       string
+	projectState      *ProjectStateStore
 
 	// Auto-compress settings
 	autoCompressEnabled   bool
@@ -392,7 +394,7 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		streamPreview:         DefaultStreamPreviewCfg(),
 		references:            DefaultReferenceRenderCfg(),
 		eventIdleTimeout:      defaultEventIdleTimeout,
-		maxQueuedMessages:    defaultMaxQueuedMessages,
+		maxQueuedMessages:     defaultMaxQueuedMessages,
 		showContextIndicator:  true,
 	}
 
@@ -893,6 +895,14 @@ func (e *Engine) SetRelayManager(rm *RelayManager) {
 
 func (e *Engine) RelayManager() *RelayManager {
 	return e.relayManager
+}
+
+func (e *Engine) SetChatProjectRouter(router *ChatProjectRouter) {
+	e.chatProjectRouter = router
+}
+
+func (e *Engine) SetMessageDeduper(d *MessageDeduper) {
+	e.messageDeduper = d
 }
 
 func (e *Engine) SetDirHistory(dh *DirHistory) {
@@ -1472,6 +1482,72 @@ func (e *Engine) resolveAlias(content string) string {
 	return content
 }
 
+func (e *Engine) shouldHandleChatMessage(msg *Message, content string) bool {
+	if e.chatProjectRouter == nil || msg == nil {
+		return true
+	}
+
+	platform := strings.TrimSpace(msg.Platform)
+	if platform == "" {
+		platform = extractPlatformName(msg.SessionKey)
+	}
+	channelID := strings.TrimSpace(effectiveChannelID(msg))
+	if channelID == "" {
+		_, parsedChatID, err := parseSessionKeyParts(msg.SessionKey)
+		if err == nil {
+			channelID = strings.TrimSpace(parsedChatID)
+		}
+	}
+	if platform == "" || channelID == "" {
+		return true
+	}
+
+	selected := strings.TrimSpace(e.chatProjectRouter.Get(platform, channelID))
+	if selected != "" && e.relayManager != nil && !e.relayManager.HasEngine(selected) {
+		e.chatProjectRouter.Clear(platform, channelID)
+		selected = ""
+	}
+	if selected == "" {
+		selected = strings.TrimSpace(e.chatProjectRouter.Claim(platform, channelID, e.name))
+	}
+	if selected == "" {
+		return true
+	}
+	if !strings.EqualFold(selected, e.name) {
+		slog.Debug("message ignored by chat project routing",
+			"platform", platform,
+			"channel_id", channelID,
+			"selected_project", selected,
+			"current_project", e.name,
+			"session", msg.SessionKey,
+			"is_project_cmd", strings.HasPrefix(strings.ToLower(strings.TrimSpace(content)), "/project"),
+		)
+		return false
+	}
+	return true
+}
+
+func (e *Engine) chatProjectRouteScope(msg *Message) (platform, channelID string, ok bool) {
+	if msg == nil {
+		return "", "", false
+	}
+	platform = strings.TrimSpace(msg.Platform)
+	if platform == "" {
+		platform = extractPlatformName(msg.SessionKey)
+	}
+	channelID = strings.TrimSpace(effectiveChannelID(msg))
+	if channelID == "" {
+		_, parsedChatID, err := parseSessionKeyParts(msg.SessionKey)
+		if err == nil {
+			channelID = strings.TrimSpace(parsedChatID)
+		}
+	}
+	if platform == "" || channelID == "" {
+		return "", "", false
+	}
+	return platform, channelID, true
+}
+
 func (e *Engine) handleMessage(p Platform, msg *Message) {
 	slog.Info("message received",
 		"platform", msg.Platform, "msg_id", msg.MessageID,
@@ -1536,6 +1612,19 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		}
 	} else {
 		msg.Content = content
+	}
+
+	if !e.shouldHandleChatMessage(msg, content) {
+		return
+	}
+	if !e.messageDeduper.ShouldProcess(msg.Platform, msg.MessageID) {
+		slog.Debug("message ignored by deduper",
+			"platform", msg.Platform,
+			"msg_id", msg.MessageID,
+			"session", msg.SessionKey,
+			"project", e.name,
+		)
+		return
 	}
 
 	// Rate limit check (per-user role-based, then global fallback)
@@ -3465,6 +3554,7 @@ var builtinCommands = []struct {
 	{[]string{"alias"}, "alias"},
 	{[]string{"delete", "del", "rm"}, "delete"},
 	{[]string{"bind"}, "bind"},
+	{[]string{"project", "proj"}, "project"},
 	{[]string{"search", "find"}, "search"},
 	{[]string{"shell", "sh", "exec", "run"}, "shell"},
 	{[]string{"show"}, "show"},
@@ -3654,6 +3744,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdDelete(p, msg, args)
 	case "bind":
 		e.cmdBind(p, msg, args)
+	case "project":
+		e.cmdProject(p, msg, args)
 	case "search":
 		e.cmdSearch(p, msg, args)
 	case "shell":
@@ -11442,6 +11534,73 @@ func (e *Engine) cmdBindStatus(p Platform, replyCtx any, chatID string) {
 		parts = append(parts, proj)
 	}
 	e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgRelayBound), strings.Join(parts, " ↔ ")))
+}
+
+func (e *Engine) cmdProject(p Platform, msg *Message, args []string) {
+	if e.chatProjectRouter == nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgRelayNotAvailable))
+		return
+	}
+	platform, channelID, ok := e.chatProjectRouteScope(msg)
+	if !ok {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgRelayNotAvailable))
+		return
+	}
+
+	showStatus := func() {
+		selected := strings.TrimSpace(e.chatProjectRouter.Get(platform, channelID))
+		if selected == "" {
+			selected = e.chatProjectRouter.Claim(platform, channelID, e.name)
+		}
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgRelayBound), selected))
+	}
+	switchTo := func(target string) {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgRelayUsage))
+			return
+		}
+		if e.relayManager != nil {
+			if !e.relayManager.HasEngine(target) {
+				available := e.relayManager.ListEngineNames()
+				if len(available) == 0 {
+					e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgRelayNoTarget), target))
+					return
+				}
+				e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgRelayNotFound), target, strings.Join(available, ", ")))
+				return
+			}
+			if !e.relayManager.EngineHasPlatform(target, platform) {
+				e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgRelayNoTarget), target))
+				return
+			}
+		}
+		e.chatProjectRouter.Set(platform, channelID, target)
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgRelayBound), target))
+	}
+
+	if len(args) == 0 {
+		showStatus()
+		return
+	}
+
+	sub := strings.ToLower(strings.TrimSpace(args[0]))
+	switch sub {
+	case "switch", "bind":
+		if len(args) < 2 {
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgRelayUsage))
+			return
+		}
+		switchTo(args[1])
+	case "remove", "unbind", "clear", "rm", "del":
+		e.chatProjectRouter.Clear(platform, channelID)
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgRelayUnbound))
+	case "status", "current":
+		showStatus()
+	default:
+		// /project <name> shorthand
+		switchTo(args[0])
+	}
 }
 
 const ccConnectInstructionMarker = "<!-- cc-connect-instructions -->"

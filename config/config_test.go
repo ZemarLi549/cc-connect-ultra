@@ -2308,6 +2308,53 @@ func TestSaveProjectSettings_ExtraFields(t *testing.T) {
 	}
 }
 
+func TestSaveProjectSettings_DynamicOptionsAndPlatformRemoval(t *testing.T) {
+	configPath := writeConfigFixture(t, feishuConfigFixture)
+	patchConfigPath(t, configPath)
+
+	err := SaveProjectSettings("alpha", ProjectSettingsUpdate{
+		AgentOptions: map[string]any{
+			"work_dir": "/tmp/new-alpha",
+			"mode":     "plan",
+			"model":    "gpt-5.4",
+		},
+		PlatformOptionUpdates: []ProjectPlatformOptionUpdate{
+			{
+				Index: 0,
+				Options: map[string]any{
+					"token":      "tg_new",
+					"allow_from": "u42",
+				},
+			},
+		},
+		RemovePlatformIndexes: []int{1, 2},
+	})
+	if err != nil {
+		t.Fatalf("SaveProjectSettings: %v", err)
+	}
+
+	cfg := readConfigFixture(t, configPath)
+	proj := cfg.Projects[0]
+	if stringMapValue(proj.Agent.Options, "work_dir") != "/tmp/new-alpha" {
+		t.Fatalf("work_dir = %q, want /tmp/new-alpha", stringMapValue(proj.Agent.Options, "work_dir"))
+	}
+	if stringMapValue(proj.Agent.Options, "mode") != "plan" {
+		t.Fatalf("mode = %q, want plan", stringMapValue(proj.Agent.Options, "mode"))
+	}
+	if stringMapValue(proj.Agent.Options, "model") != "gpt-5.4" {
+		t.Fatalf("model = %q, want gpt-5.4", stringMapValue(proj.Agent.Options, "model"))
+	}
+	if len(proj.Platforms) != 1 {
+		t.Fatalf("len(platforms) = %d, want 1", len(proj.Platforms))
+	}
+	if proj.Platforms[0].Type != "telegram" {
+		t.Fatalf("remaining platform = %q, want telegram", proj.Platforms[0].Type)
+	}
+	if stringMapValue(proj.Platforms[0].Options, "token") != "tg_new" {
+		t.Fatalf("telegram token = %q, want tg_new", stringMapValue(proj.Platforms[0].Options, "token"))
+	}
+}
+
 func TestGetProjectConfigDetails(t *testing.T) {
 	configPath := writeConfigFixture(t, feishuConfigFixture)
 	patchConfigPath(t, configPath)
@@ -2329,7 +2376,7 @@ func TestAddPlatformToProject_NewProjectWithAgentTypeAndWorkDir(t *testing.T) {
 	configPath := writeConfigFixture(t, feishuConfigFixture)
 	patchConfigPath(t, configPath)
 
-	err := AddPlatformToProject("sigma", PlatformConfig{Type: "slack", Options: map[string]any{"token": "x"}}, "/sigma", "gemini")
+	err := AddPlatformToProject("sigma", PlatformConfig{Type: "slack", Options: map[string]any{"token": "x"}}, "/sigma", "gemini", nil)
 	if err != nil {
 		t.Fatalf("AddPlatformToProject: %v", err)
 	}
@@ -2356,7 +2403,7 @@ func TestAddPlatformToProject_NewProjectClonesAgentWhenAgentTypeEmpty(t *testing
 	configPath := writeConfigFixture(t, feishuConfigFixture)
 	patchConfigPath(t, configPath)
 
-	err := AddPlatformToProject("tau", PlatformConfig{Type: "slack", Options: map[string]any{"token": "x"}}, "", "")
+	err := AddPlatformToProject("tau", PlatformConfig{Type: "slack", Options: map[string]any{"token": "x"}}, "", "", nil)
 	if err != nil {
 		t.Fatalf("AddPlatformToProject: %v", err)
 	}

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chenhg5/cc-connect/config"
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/config"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 // runDoctor dispatches `cc-connect doctor ...`. Today the only subcommand

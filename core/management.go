@@ -18,16 +18,24 @@ import (
 // ProjectSettingsUpdate is passed to SetSaveProjectSettings to persist management API PATCH fields.
 // The implementation (typically in cmd/cc-connect) maps this to config.ProjectSettingsUpdate.
 type ProjectSettingsUpdate struct {
-	Language             *string
-	AdminFrom            *string
-	DisabledCommands     []string
-	WorkDir              *string
-	Mode                 *string
-	AgentType            *string
-	ShowContextIndicator *bool
-	ReplyFooter          *bool
-	InjectSender         *bool
-	PlatformAllowFrom    map[string]string
+	Language              *string
+	AdminFrom             *string
+	DisabledCommands      []string
+	WorkDir               *string
+	Mode                  *string
+	AgentType             *string
+	ShowContextIndicator  *bool
+	ReplyFooter           *bool
+	InjectSender          *bool
+	PlatformAllowFrom     map[string]string
+	AgentOptions          map[string]any
+	PlatformOptionUpdates []ProjectPlatformOptionUpdate
+	RemovePlatformIndexes []int
+}
+
+type ProjectPlatformOptionUpdate struct {
+	Index   int
+	Options map[string]any
 }
 
 // ManagementServer provides an HTTP REST API for external management tools
@@ -46,16 +54,18 @@ type ManagementServer struct {
 	heartbeatScheduler *HeartbeatScheduler
 	bridgeServer       *BridgeServer
 
-	setupFeishuSave      func(req FeishuSetupSaveRequest) error
-	setupWeixinSave      func(req WeixinSetupSaveRequest) error
-	addPlatformToProject func(projectName, platType string, opts map[string]any, workDir, agentType string) error
-	removeProject        func(projectName string) error
-	saveProjectSettings  func(projectName string, update ProjectSettingsUpdate) error
-	getProjectConfig     func(projectName string) map[string]any
-	saveProviderRefs     func(projectName string, refs []string) error
-	configFilePath       string
-	getGlobalSettings    func() map[string]any
-	saveGlobalSettings   func(map[string]any) error
+	setupFeishuSave        func(req FeishuSetupSaveRequest) error
+	setupWeixinSave        func(req WeixinSetupSaveRequest) error
+	addPlatformToProject   func(projectName, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error
+	removeProject          func(projectName string) error
+	saveProjectSettings    func(projectName string, update ProjectSettingsUpdate) error
+	getProjectConfig       func(projectName string) map[string]any
+	saveProviderRefs       func(projectName string, refs []string) error
+	configFilePath         string
+	getGlobalSettings      func() map[string]any
+	saveGlobalSettings     func(map[string]any) error
+	listConfiguredProjects func() ([]string, error)
+	lookupFeishuIDs        func(projectName, query string, limit int) (map[string]any, error)
 
 	// Global provider callbacks (set by cmd/cc-connect)
 	listGlobalProviders  func() ([]GlobalProviderInfo, error)
@@ -97,7 +107,7 @@ func (m *ManagementServer) SetSetupWeixinSave(fn func(WeixinSetupSaveRequest) er
 	m.setupWeixinSave = fn
 }
 
-func (m *ManagementServer) SetAddPlatformToProject(fn func(string, string, map[string]any, string, string) error) {
+func (m *ManagementServer) SetAddPlatformToProject(fn func(string, string, map[string]any, string, string, map[string]any) error) {
 	m.addPlatformToProject = fn
 }
 
@@ -127,6 +137,14 @@ func (m *ManagementServer) SetGetGlobalSettings(fn func() map[string]any) {
 
 func (m *ManagementServer) SetSaveGlobalSettings(fn func(map[string]any) error) {
 	m.saveGlobalSettings = fn
+}
+
+func (m *ManagementServer) SetListConfiguredProjects(fn func() ([]string, error)) {
+	m.listConfiguredProjects = fn
+}
+
+func (m *ManagementServer) SetLookupFeishuIDs(fn func(projectName, query string, limit int) (map[string]any, error)) {
+	m.lookupFeishuIDs = fn
 }
 
 // GlobalProviderInfo is the wire type for global provider CRUD in the management API.
@@ -564,10 +582,10 @@ func (m *ManagementServer) handleProjects(w http.ResponseWriter, r *http.Request
 		return
 	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	projects := make([]map[string]any, 0, len(m.engines))
+	existing := make(map[string]struct{}, len(m.engines))
 	for name, e := range m.engines {
+		existing[name] = struct{}{}
 		platNames := make([]string, len(e.platforms))
 		for i, p := range e.platforms {
 			platNames[i] = p.Name()
@@ -589,6 +607,53 @@ func (m *ManagementServer) handleProjects(w http.ResponseWriter, r *http.Request
 			"sessions_count":    sessCount,
 			"heartbeat_enabled": hbEnabled,
 		})
+	}
+	m.mu.RUnlock()
+
+	if m.listConfiguredProjects != nil {
+		names, err := m.listConfiguredProjects()
+		if err == nil {
+			for _, name := range names {
+				if _, ok := existing[name]; ok {
+					continue
+				}
+				agentType := "pending"
+				platNames := []string{}
+				if m.getProjectConfig != nil {
+					if extra := m.getProjectConfig(name); extra != nil {
+						if at, ok := extra["agent_type"].(string); ok && strings.TrimSpace(at) != "" {
+							agentType = strings.TrimSpace(at)
+						}
+						switch pcs := extra["platform_configs"].(type) {
+						case []map[string]any:
+							for _, pc := range pcs {
+								if typ, ok := pc["type"].(string); ok && strings.TrimSpace(typ) != "" {
+									platNames = append(platNames, strings.TrimSpace(typ))
+								}
+							}
+						case []any:
+							for _, item := range pcs {
+								pc, ok := item.(map[string]any)
+								if !ok {
+									continue
+								}
+								if typ, ok := pc["type"].(string); ok && strings.TrimSpace(typ) != "" {
+									platNames = append(platNames, strings.TrimSpace(typ))
+								}
+							}
+						}
+					}
+				}
+				projects = append(projects, map[string]any{
+					"name":              name,
+					"agent_type":        agentType,
+					"platforms":         platNames,
+					"sessions_count":    0,
+					"heartbeat_enabled": false,
+				})
+				existing[name] = struct{}{}
+			}
+		}
 	}
 	mgmtJSON(w, http.StatusOK, map[string]any{"projects": projects})
 }
@@ -618,6 +683,10 @@ func (m *ManagementServer) handleProjectRoutes(w http.ResponseWriter, r *http.Re
 	// and must work for brand-new projects that have no engine yet.
 	if sub == "add-platform" {
 		m.handleProjectAddPlatform(w, r, projName)
+		return
+	}
+	if sub == "feishu-lookup" {
+		m.handleProjectFeishuLookup(w, r, projName)
 		return
 	}
 
@@ -651,6 +720,40 @@ func (m *ManagementServer) handleProjectRoutes(w http.ResponseWriter, r *http.Re
 	default:
 		mgmtError(w, http.StatusNotFound, "not found")
 	}
+}
+
+func (m *ManagementServer) handleProjectFeishuLookup(w http.ResponseWriter, r *http.Request, projectName string) {
+	if r.Method != http.MethodGet {
+		mgmtError(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	if m.lookupFeishuIDs == nil {
+		mgmtError(w, http.StatusServiceUnavailable, "feishu lookup not configured")
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		mgmtError(w, http.StatusBadRequest, "q is required")
+		return
+	}
+	limit := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			mgmtError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		if n > 100 {
+			n = 100
+		}
+		limit = n
+	}
+	resp, err := m.lookupFeishuIDs(projectName, q, limit)
+	if err != nil {
+		mgmtError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	mgmtJSON(w, http.StatusOK, resp)
 }
 
 func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Request, name string, e *Engine) {
@@ -727,16 +830,22 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 
 	if r.Method == http.MethodPatch {
 		var body struct {
-			Language             *string           `json:"language"`
-			AdminFrom            *string           `json:"admin_from"`
-			DisabledCommands     []string          `json:"disabled_commands"`
-			WorkDir              *string           `json:"work_dir"`
-			Mode                 *string           `json:"mode"`
-			AgentType            *string           `json:"agent_type"`
-			ShowContextIndicator *bool             `json:"show_context_indicator"`
-			ReplyFooter          *bool             `json:"reply_footer"`
-			InjectSender         *bool             `json:"inject_sender"`
-			PlatformAllowFrom    map[string]string `json:"platform_allow_from"`
+			Language              *string           `json:"language"`
+			AdminFrom             *string           `json:"admin_from"`
+			DisabledCommands      []string          `json:"disabled_commands"`
+			WorkDir               *string           `json:"work_dir"`
+			Mode                  *string           `json:"mode"`
+			AgentType             *string           `json:"agent_type"`
+			ShowContextIndicator  *bool             `json:"show_context_indicator"`
+			ReplyFooter           *bool             `json:"reply_footer"`
+			InjectSender          *bool             `json:"inject_sender"`
+			PlatformAllowFrom     map[string]string `json:"platform_allow_from"`
+			AgentOptions          map[string]any    `json:"agent_options"`
+			PlatformOptionUpdates []struct {
+				Index   int            `json:"index"`
+				Options map[string]any `json:"options"`
+			} `json:"platform_option_updates"`
+			RemovePlatformIndexes []int `json:"remove_platform_indexes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			mgmtError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -799,19 +908,32 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 			}
 			restartRequired = true
 		}
+		if body.AgentOptions != nil || len(body.PlatformOptionUpdates) > 0 || len(body.RemovePlatformIndexes) > 0 {
+			restartRequired = true
+		}
 
 		if m.saveProjectSettings != nil {
+			platUpdates := make([]ProjectPlatformOptionUpdate, 0, len(body.PlatformOptionUpdates))
+			for _, u := range body.PlatformOptionUpdates {
+				platUpdates = append(platUpdates, ProjectPlatformOptionUpdate{
+					Index:   u.Index,
+					Options: u.Options,
+				})
+			}
 			patch := ProjectSettingsUpdate{
-				Language:             body.Language,
-				AdminFrom:            body.AdminFrom,
-				DisabledCommands:     body.DisabledCommands,
-				WorkDir:              body.WorkDir,
-				Mode:                 body.Mode,
-				AgentType:            body.AgentType,
-				ShowContextIndicator: body.ShowContextIndicator,
-				ReplyFooter:          body.ReplyFooter,
-				InjectSender:         body.InjectSender,
-				PlatformAllowFrom:    body.PlatformAllowFrom,
+				Language:              body.Language,
+				AdminFrom:             body.AdminFrom,
+				DisabledCommands:      body.DisabledCommands,
+				WorkDir:               body.WorkDir,
+				Mode:                  body.Mode,
+				AgentType:             body.AgentType,
+				ShowContextIndicator:  body.ShowContextIndicator,
+				ReplyFooter:           body.ReplyFooter,
+				InjectSender:          body.InjectSender,
+				PlatformAllowFrom:     body.PlatformAllowFrom,
+				AgentOptions:          body.AgentOptions,
+				PlatformOptionUpdates: platUpdates,
+				RemovePlatformIndexes: body.RemovePlatformIndexes,
 			}
 			if err := m.saveProjectSettings(name, patch); err != nil {
 				slog.Warn("management: failed to persist project settings", "project", name, "error", err)

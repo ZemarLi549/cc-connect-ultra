@@ -319,6 +319,53 @@ func TestMgmt_ProjectPatch(t *testing.T) {
 	}
 }
 
+func TestMgmt_ProjectPatch_DynamicOptionsPersistAndRequireRestart(t *testing.T) {
+	mgmt, ts, _ := testManagementServer(t, "tok")
+	var got ProjectSettingsUpdate
+	mgmt.SetSaveProjectSettings(func(_ string, u ProjectSettingsUpdate) error {
+		got = u
+		return nil
+	})
+
+	r := mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{
+		"agent_options": map[string]any{
+			"work_dir": "D:\\ai_study",
+			"mode":     "default",
+		},
+		"platform_option_updates": []map[string]any{
+			{
+				"index": 0,
+				"options": map[string]any{
+					"app_id":      "cli_xxx",
+					"allow_from":  "*",
+					"group_reply": true,
+				},
+			},
+		},
+		"remove_platform_indexes": []int{2},
+	})
+	if !r.OK {
+		t.Fatalf("patch failed: %s", r.Error)
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("unmarshal response data: %v", err)
+	}
+	if data["restart_required"] != true {
+		t.Fatalf("restart_required = %#v, want true", data["restart_required"])
+	}
+	if got.AgentOptions["mode"] != "default" {
+		t.Fatalf("agent_options.mode = %#v, want default", got.AgentOptions["mode"])
+	}
+	if len(got.PlatformOptionUpdates) != 1 || got.PlatformOptionUpdates[0].Index != 0 {
+		t.Fatalf("platform_option_updates = %#v", got.PlatformOptionUpdates)
+	}
+	if len(got.RemovePlatformIndexes) != 1 || got.RemovePlatformIndexes[0] != 2 {
+		t.Fatalf("remove_platform_indexes = %#v, want [2]", got.RemovePlatformIndexes)
+	}
+}
+
 func TestMgmt_Sessions(t *testing.T) {
 	_, ts, e := testManagementServer(t, "tok")
 
@@ -861,7 +908,7 @@ func TestMgmt_AddPlatformToNewProject_DoesNotRequireEngine(t *testing.T) {
 	mgmt, ts, _ := testManagementServer(t, "tok")
 
 	var savedProject, savedPlatType string
-	mgmt.SetAddPlatformToProject(func(proj, platType string, opts map[string]any, workDir, agentType string) error {
+	mgmt.SetAddPlatformToProject(func(proj, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error {
 		savedProject = proj
 		savedPlatType = platType
 		return nil

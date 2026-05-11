@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chenhg5/cc-connect/config"
+	"github.com/ZemarLi549/cc-connect-ultra/config"
 	qrterminal "github.com/mdp/qrterminal/v3"
 	"rsc.io/qr"
 )

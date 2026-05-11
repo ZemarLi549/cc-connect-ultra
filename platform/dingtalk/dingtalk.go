@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	dingtalkClient "github.com/open-dingtalk/dingtalk-stream-sdk-go/client"

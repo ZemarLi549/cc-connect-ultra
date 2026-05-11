@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/chenhg5/cc-connect/agent/acp"
+	"github.com/ZemarLi549/cc-connect-ultra/agent/acp"
 )
 
 // TestApplyDevinDefaults_FillsUnsetFields verifies the three Devin-

@@ -10,27 +10,12 @@ import {
   ChevronRight,
   Plug,
   Puzzle,
-  Building2,
-  Bot,
-  Sparkles,
-  BarChart3,
-  Shield,
-  FolderTree,
-  ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 
 const navItems = [
   { key: 'dashboard', path: '/', icon: LayoutDashboard },
-  { key: 'enterprise', path: '/enterprise', icon: Building2, label: '\u4f01\u4e1a\u5e73\u53f0' },
-  { key: 'spaces', path: '/enterprise/spaces', icon: FolderKanban, label: '\u7528\u6237\u7a7a\u95f4' },
-  { key: 'bots', path: '/enterprise/bots', icon: Bot, label: '\u5171\u4eab\u673a\u5668\u4eba' },
-  { key: 'skillStudio', path: '/enterprise/skills', icon: Sparkles, label: '\u6280\u80fd\u5de5\u574a' },
-  { key: 'taskCenter', path: '/enterprise/tasks', icon: ListChecks, label: '\u4efb\u52a1\u4e2d\u5fc3' },
-  { key: 'rbac', path: '/enterprise/rbac', icon: Shield, label: '\u89d2\u8272\u6743\u9650' },
-  { key: 'enterpriseProjects', path: '/enterprise/projects', icon: FolderTree, label: '\u9879\u76ee\u6863\u6848' },
-  { key: 'analytics', path: '/enterprise/analytics', icon: BarChart3, label: '\u7edf\u8ba1\u5206\u6790' },
   { key: 'projects', path: '/projects', icon: FolderKanban },
   { key: 'providers', path: '/providers', icon: Plug },
   { key: 'skills', path: '/skills', icon: Puzzle },
@@ -65,13 +50,13 @@ export default function Sidebar() {
           </span>
         ) : (
           <span className="text-base font-bold tracking-tight text-gray-900 dark:text-white">
-            {'\u7384\u661f'}<span className="text-accent">Ops</span>
+            {'\u7384\u661f'}<span className="text-accent">Robot</span>
           </span>
         )}
       </div>
 
       <nav className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">
-        {navItems.map(({ key, path, icon: Icon, label }) => (
+        {navItems.map(({ key, path, icon: Icon }) => (
           <NavLink
             key={key}
             to={path}
@@ -86,7 +71,7 @@ export default function Sidebar() {
             }
           >
             <Icon size={18} className="shrink-0" />
-            {!collapsed && <span>{label || t(`nav.${key}`)}</span>}
+            {!collapsed && <span>{t(`nav.${key}`)}</span>}
           </NavLink>
         ))}
       </nav>

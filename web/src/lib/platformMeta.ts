@@ -14,6 +14,30 @@ export interface PlatformMeta {
 }
 
 export const platformMeta: Record<string, PlatformMeta> = {
+  feishu: {
+    label: 'Feishu / Lark',
+    fields: [
+      { key: 'app_id', labelKey: 'fields.appId', required: true },
+      { key: 'app_secret', labelKey: 'fields.appSecret', required: true, type: 'password' },
+      { key: 'allow_from', labelKey: 'fields.allowFrom', placeholder: '* (all)', group: 'advanced' },
+      { key: 'allow_chat', labelKey: 'fields.allowChat', placeholder: 'oc_xxx,oc_yyy', group: 'advanced' },
+      { key: 'group_reply_all', labelKey: 'fields.groupReplyAll', type: 'boolean', group: 'advanced' },
+      { key: 'group_only', labelKey: 'fields.groupOnly', type: 'boolean', group: 'advanced' },
+      { key: 'share_session_in_channel', labelKey: 'fields.sharedGroupSession', type: 'boolean', group: 'advanced' },
+    ],
+  },
+  lark: {
+    label: 'Feishu / Lark',
+    fields: [
+      { key: 'app_id', labelKey: 'fields.appId', required: true },
+      { key: 'app_secret', labelKey: 'fields.appSecret', required: true, type: 'password' },
+      { key: 'allow_from', labelKey: 'fields.allowFrom', placeholder: '* (all)', group: 'advanced' },
+      { key: 'allow_chat', labelKey: 'fields.allowChat', placeholder: 'oc_xxx,oc_yyy', group: 'advanced' },
+      { key: 'group_reply_all', labelKey: 'fields.groupReplyAll', type: 'boolean', group: 'advanced' },
+      { key: 'group_only', labelKey: 'fields.groupOnly', type: 'boolean', group: 'advanced' },
+      { key: 'share_session_in_channel', labelKey: 'fields.sharedGroupSession', type: 'boolean', group: 'advanced' },
+    ],
+  },
   telegram: {
     label: 'Telegram',
     fields: [

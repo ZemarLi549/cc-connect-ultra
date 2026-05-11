@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func TestDefaultAuditDir_HomeSuffix(t *testing.T) {

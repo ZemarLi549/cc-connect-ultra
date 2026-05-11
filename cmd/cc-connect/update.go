@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	githubRepo   = "chenhg5/cc-connect"
+	githubRepo   = "ZemarLi549/cc-connect-ultra"
 	githubAPI    = "https://api.github.com/repos/" + githubRepo + "/releases/latest"
 	githubAllAPI = "https://api.github.com/repos/" + githubRepo + "/releases"
 	downloadBase = "https://github.com/" + githubRepo + "/releases/download"

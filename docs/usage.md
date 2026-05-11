@@ -386,7 +386,7 @@ cc-connect doctor user-isolation
 ```
 
 This runs the full preflight (the three go/no-go gates from
-[#496](https://github.com/chenhg5/cc-connect/issues/496)) and an
+[#496](https://github.com/ZemarLi549/cc-connect-ultra/issues/496)) and an
 **isolation probe**: it spawns a fixed shell script as the target user
 and reports what the target can read, what it's denied, and any
 cross-user leaks. Output goes to stdout plus a JSON report in

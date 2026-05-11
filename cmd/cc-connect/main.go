@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	ccconnect "github.com/chenhg5/cc-connect"
-	"github.com/chenhg5/cc-connect/config"
-	"github.com/chenhg5/cc-connect/core"
-	"github.com/chenhg5/cc-connect/daemon"
+	ccconnect "github.com/ZemarLi549/cc-connect-ultra"
+	"github.com/ZemarLi549/cc-connect-ultra/config"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
+	"github.com/ZemarLi549/cc-connect-ultra/daemon"
 	// Agent and platform imports are in separate plugin_*.go files
 	// controlled by build tags. See Makefile for selective compilation.
 )
@@ -182,6 +182,8 @@ func main() {
 
 	engines := make([]*core.Engine, 0, len(cfg.Projects))
 	effectiveWorkDirs := make([]string, 0, len(cfg.Projects))
+	chatProjectRouter := core.NewChatProjectRouter(filepath.Join(cfg.DataDir, "chat_project_routes.json"))
+	messageDeduper := core.NewMessageDeduper(filepath.Join(cfg.DataDir, "run", "message_dedupe"), 2*time.Minute)
 
 	for _, proj := range cfg.Projects {
 		// Inject project-level run_as_user / run_as_env into the agent's
@@ -258,6 +260,8 @@ func main() {
 		engine.SetFilterExternalSessions(proj.FilterExternalSessions != nil && *proj.FilterExternalSessions)
 		engine.SetBaseWorkDir(workDir)
 		engine.SetProjectStateStore(projectState)
+		engine.SetChatProjectRouter(chatProjectRouter)
+		engine.SetMessageDeduper(messageDeduper)
 
 		// Wire multi-workspace mode
 		if proj.Mode == "multi-workspace" {
@@ -838,7 +842,10 @@ func main() {
 				OwnerOpenID:       req.OwnerOpenID,
 				SetAllowFromEmpty: true,
 			})
-			return err
+			if err != nil {
+				return err
+			}
+			return saveSetupAgentOptions(req.ProjectName, req.WorkDir, req.AgentOptions)
 		})
 		mgmtSrv.SetSetupWeixinSave(func(req core.WeixinSetupSaveRequest) error {
 			_, err := config.EnsureProjectWithWeixinPlatform(config.EnsureProjectWithWeixinOptions{
@@ -857,30 +864,45 @@ func main() {
 				ScannedUserID:     req.IlinkUserID,
 				SetAllowFromEmpty: true,
 			})
-			return err
+			if err != nil {
+				return err
+			}
+			return saveSetupAgentOptions(req.ProjectName, req.WorkDir, req.AgentOptions)
 		})
-		mgmtSrv.SetAddPlatformToProject(func(projectName, platType string, opts map[string]any, workDir, agentType string) error {
+		mgmtSrv.SetAddPlatformToProject(func(projectName, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error {
 			if opts == nil {
 				opts = map[string]any{}
 			}
-			return config.AddPlatformToProject(projectName, config.PlatformConfig{Type: platType, Options: opts}, workDir, agentType)
+			return config.AddPlatformToProject(projectName, config.PlatformConfig{Type: platType, Options: opts}, workDir, agentType, agentOptions)
 		})
 		mgmtSrv.SetRemoveProject(config.RemoveProject)
 		mgmtSrv.SetSaveProjectSettings(func(name string, u core.ProjectSettingsUpdate) error {
+			platUpdates := make([]config.ProjectPlatformOptionUpdate, 0, len(u.PlatformOptionUpdates))
+			for _, pu := range u.PlatformOptionUpdates {
+				platUpdates = append(platUpdates, config.ProjectPlatformOptionUpdate{
+					Index:   pu.Index,
+					Options: pu.Options,
+				})
+			}
 			return config.SaveProjectSettings(name, config.ProjectSettingsUpdate{
-				Language:             u.Language,
-				AdminFrom:            u.AdminFrom,
-				DisabledCommands:     u.DisabledCommands,
-				WorkDir:              u.WorkDir,
-				Mode:                 u.Mode,
-				AgentType:            u.AgentType,
-				ShowContextIndicator: u.ShowContextIndicator,
-				ReplyFooter:          u.ReplyFooter,
-				InjectSender:         u.InjectSender,
-				PlatformAllowFrom:    u.PlatformAllowFrom,
+				Language:              u.Language,
+				AdminFrom:             u.AdminFrom,
+				DisabledCommands:      u.DisabledCommands,
+				WorkDir:               u.WorkDir,
+				Mode:                  u.Mode,
+				AgentType:             u.AgentType,
+				ShowContextIndicator:  u.ShowContextIndicator,
+				ReplyFooter:           u.ReplyFooter,
+				InjectSender:          u.InjectSender,
+				PlatformAllowFrom:     u.PlatformAllowFrom,
+				AgentOptions:          u.AgentOptions,
+				PlatformOptionUpdates: platUpdates,
+				RemovePlatformIndexes: u.RemovePlatformIndexes,
 			})
 		})
 		mgmtSrv.SetGetProjectConfig(config.GetProjectConfigDetails)
+		mgmtSrv.SetListConfiguredProjects(config.ListProjects)
+		mgmtSrv.SetLookupFeishuIDs(lookupFeishuIDs)
 		mgmtSrv.SetSaveProviderRefs(config.SaveProviderRefs)
 		mgmtSrv.SetConfigFilePath(configPath)
 		enterpriseStore, err = core.NewEnterpriseDataStore(core.EnterpriseStoreOptions{
@@ -1184,6 +1206,40 @@ func applyProjectStateOverride(projectName string, agent core.Agent, configuredW
 	return override
 }
 
+func saveSetupAgentOptions(projectName, workDir string, incoming map[string]any) error {
+	if len(incoming) == 0 {
+		return nil
+	}
+
+	merged := map[string]any{}
+	if details := config.GetProjectConfigDetails(projectName); details != nil {
+		if existing, ok := details["agent_options"].(map[string]any); ok {
+			for k, v := range existing {
+				merged[k] = v
+			}
+		}
+	}
+	for k, v := range incoming {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		merged[key] = v
+	}
+	wd := strings.TrimSpace(workDir)
+	if wd != "" {
+		merged["work_dir"] = wd
+	}
+	var wdPtr *string
+	if wd != "" {
+		wdPtr = &wd
+	}
+	return config.SaveProjectSettings(projectName, config.ProjectSettingsUpdate{
+		WorkDir:      wdPtr,
+		AgentOptions: merged,
+	})
+}
+
 // resolveClaudeProjectDir returns the Claude Code project directory for a given
 // work directory, or "" if it doesn't exist.
 func resolveClaudeProjectDir(workDir string) string {
@@ -1222,7 +1278,7 @@ func bootstrapConfig(path string) error {
 	}
 
 	const tmpl = `# cc-connect configuration
-# Docs: https://github.com/chenhg5/cc-connect
+# Docs: https://github.com/ZemarLi549/cc-connect-ultra
 
 [log]
 level = "info"
@@ -1249,7 +1305,7 @@ app_id = "your-feishu-app-id"
 app_secret = "your-feishu-app-secret"
 
 # For more platforms (DingTalk, Telegram, Slack, Discord, LINE, WeChat Work)
-# see: https://github.com/chenhg5/cc-connect/blob/main/config.example.toml
+# see: https://github.com/ZemarLi549/cc-connect-ultra/blob/main/config.example.toml
 `
 	return os.WriteFile(path, []byte(tmpl), 0o644)
 }
@@ -1274,8 +1330,8 @@ func printUsage() {
   Supports: Claude Code, Codex, Cursor, Gemini CLI, Qoder CLI, OpenCode
   Platforms: Feishu, Telegram, Slack, DingTalk, Discord, LINE, WeChat Work, Weixin, QQ, QQ Bot
 
-  GitHub:  https://github.com/chenhg5/cc-connect
-  Docs:    https://github.com/chenhg5/cc-connect/blob/main/INSTALL.md
+  GitHub:  https://github.com/ZemarLi549/cc-connect-ultra
+  Docs:    https://github.com/ZemarLi549/cc-connect-ultra/blob/main/INSTALL.md
 
 Usage:
   cc-connect [flags]

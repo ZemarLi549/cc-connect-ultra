@@ -10,6 +10,9 @@
 #
 # Each [[projects]] entry binds one code directory to its own agent + platforms.
 # A single cc-connect process can manage multiple projects simultaneously.
+# Multi-project chat routing:
+# In the same chat, use `/project status` and `/project switch <project_name>`
+# to choose which project responds, avoiding duplicate replies.
 # 每个 [[projects]] 将一个代码目录绑定到独立的 agent 和平台。
 # 单个 cc-connect 进程可以同时管理多个项目。
 
@@ -49,7 +52,7 @@ level = "info" # debug, info, warn, error
 #
 # Remote presets URL (fetches recommended providers list from GitHub/Gitee)
 # 远程预设列表 URL（从 GitHub/Gitee 拉取推荐服务商）
-# provider_presets_url = "https://raw.githubusercontent.com/chenhg5/cc-connect/main/provider-presets.json"
+# provider_presets_url = "https://raw.githubusercontent.com/ZemarLi549/cc-connect-ultra/main/provider-presets.json"
 
 # [[providers]]
 # name = "anthropic"
@@ -567,26 +570,36 @@ level = "info" # debug, info, warn, error
 # mode = "yolo"  # "default" | "acceptEdits" (edit) | "plan" | "auto" | "bypassPermissions" (yolo)
 #
 # # Dify example / Dify 示例
-[projects.agent]
-type = "dify"
-# #
-[projects.agent.options]
-work_dir = "./workspaces/dify"
-base_url = "https://api.dify.ai/v1"
-api_key = "app-SH0DWKkHbCXW22phqWcurTtI"
-# # # Optional: leave empty to auto-detect from GET /info
-app_mode = "advanced-chat"  # "advanced-chat" | "chat" | "completion" | "workflow"
-user = "cc-connect:my-backend"
-# # # For workflow/completion apps, map the incoming chat text into one input field.
-query_input_key = "query"
-[projects.agent.options.inputs]
-tenant = "ops"
+# Dify example / Dify 示例（按需取消注释）
+# [[projects]]
+# name = "my-dify"
+#
+# [projects.agent]
+# type = "dify"
+#
+# [projects.agent.options]
+# work_dir = "./workspaces/dify"
+# mode = "default"
+# base_url = "https://api.dify.ai/v1"
+# api_key = "app-xxxxxxxxxxxxxxxx"
+# app_mode = "advanced-chat"  # "advanced-chat" | "chat" | "completion" | "workflow"
+# user = "cc-connect:my-dify"
+# query_input_key = "query"   # Used for completion/workflow apps
+#
+# IMPORTANT: inputs must be a dictionary/map (never null).
+# Option A (no fixed inputs):
+# inputs = {}
+#
+# Option B (dynamic fixed inputs; keys are fully custom):
+# [projects.agent.options.inputs]
+# tenant = "ops"
+# region = "cn"
 #
 # [[projects.platforms]]
-# type = "slack"
+# type = "feishu"
 # [projects.platforms.options]
-# bot_token = "xoxb-..."
-# app_token = "xapp-..."
+# app_id = "your-feishu-app-id"
+# app_secret = "your-feishu-app-secret"
 
 # =============================================================================
 # Project 1 / 项目 1
@@ -847,8 +860,10 @@ app_secret = "your-feishu-app-secret"
 # enable_feishu_card = true  # Enable Feishu interactive cards (default: true); set false to force plain-text replies
 #                              # 启用飞书交互式卡片（默认 true）；设为 false 时强制回退纯文本回复
 # allow_from = "*"          # Allowed user open_ids, comma-separated; "*" = all (default). Use /whoami to get your open_id.
+# allow_from = "ou_xxx,ou_yyy" # Example: allow only specific users / 示例：只允许指定用户
 #                              # 允许的用户 open_id，逗号分隔；"*" 表示所有（默认）。发送 /whoami 获取你的 open_id。
 # allow_chat = "*"          # Allowed group chat_ids, comma-separated; "*" = all (default). Find chat_id in group settings.
+# allow_chat = "oc_xxx,oc_yyy" # Example: allow only specific groups / 示例：只允许指定群聊
 #                           # 允许的群聊 chat_id，逗号分隔；"*" 表示所有（默认）。在群设置中查看 chat_id。
 # group_only = false        # If true, only respond to group chat messages; ignore private (P2P) messages (default: false)
 #                           # 设为 true 时，仅响应群聊消息，忽略私聊（P2P）消息（默认 false）

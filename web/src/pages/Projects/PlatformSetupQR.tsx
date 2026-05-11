@@ -17,11 +17,12 @@ interface Props {
   projectName: string;
   workDir?: string;
   agentType?: string;
-  onComplete: () => void;
+  agentOptions?: Record<string, any>;
+  onComplete: (restarted?: boolean) => void;
   onCancel: () => void;
 }
 
-export default function PlatformSetupQR({ platformType, projectName, workDir, agentType, onComplete, onCancel }: Props) {
+export default function PlatformSetupQR({ platformType, projectName, workDir, agentType, agentOptions, onComplete, onCancel }: Props) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('idle');
   const [qrUrl, setQrUrl] = useState('');
@@ -84,6 +85,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
                 owner_open_id: res.owner_open_id,
                 work_dir: workDir,
                 agent_type: agentType,
+                agent_options: agentOptions,
               });
               setPhase('completed');
               pollingRef.current = false;
@@ -114,7 +116,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
       pollingRef.current = false;
     };
     poll();
-  }, [projectName]);
+  }, [agentOptions, agentType, projectName, workDir]);
 
   const startWeixinFlow = useCallback(async () => {
     setPhase('loading');
@@ -153,6 +155,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
                 ilink_user_id: pollRes.ilink_user_id,
                 work_dir: workDir,
                 agent_type: agentType,
+                agent_options: agentOptions,
               });
               setPhase('completed');
               return;
@@ -177,7 +180,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
       setError(e?.message || String(e));
       setPhase('error');
     }
-  }, [projectName]);
+  }, [agentOptions, agentType, projectName, workDir]);
 
   const startFlow = isFeishu ? startFeishuFlow : startWeixinFlow;
 
@@ -265,7 +268,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
                 try {
                   await restartSystem();
                   setPhase('restarting' as Phase);
-                  setTimeout(() => onComplete(), 3000);
+                  setTimeout(() => onComplete(true), 3000);
                 } catch (e: any) {
                   setError(e?.message || String(e));
                 }
@@ -273,7 +276,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
             >
               <RotateCcw size={14} /> {t('setup.restartNow', 'Restart Now')}
             </Button>
-            <Button onClick={onComplete}>{t('setup.later', 'Later')}</Button>
+            <Button onClick={() => onComplete(false)}>{t('setup.later', 'Later')}</Button>
           </div>
         </div>
       )}

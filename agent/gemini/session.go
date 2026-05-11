@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 // geminiSession manages multi-turn conversations with the Gemini CLI.

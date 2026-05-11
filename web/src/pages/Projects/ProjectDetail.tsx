@@ -6,14 +6,14 @@ import {
   Trash2, Plus, Check, Clock, ExternalLink, Link2,
 } from 'lucide-react';
 import { Card, Badge, Button, Input, Modal, EmptyState } from '@/components/ui';
-import { getProject, updateProject, deleteProject, listAgentTypes, type ProjectDetail as ProjectDetailType } from '@/api/projects';
+import { getProject, updateProject, deleteProject, listAgentTypes, lookupFeishuIds, type ProjectDetail as ProjectDetailType } from '@/api/projects';
 import { listProviders, addProvider, removeProvider, activateProvider, type Provider, listGlobalProviders, type GlobalProvider, saveProviderRefs } from '@/api/providers';
 import { getHeartbeat, pauseHeartbeat, resumeHeartbeat, triggerHeartbeat, setHeartbeatInterval, type HeartbeatStatus } from '@/api/heartbeat';
 import { restartSystem } from '@/api/status';
 import { formatTime, cn } from '@/lib/utils';
 import PlatformSetupQR from './PlatformSetupQR';
 import PlatformManualForm from './PlatformManualForm';
-import { platformMeta } from '@/lib/platformMeta';
+import { platformMeta, type FieldDef } from '@/lib/platformMeta';
 
 const PLATFORM_OPTIONS: { key: string; label: string; color: string; abbr: string; qr?: boolean }[] = [
   { key: 'feishu', label: 'Feishu / Lark', abbr: 'FS', color: 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400', qr: true },
@@ -29,9 +29,217 @@ const PLATFORM_OPTIONS: { key: string; label: string; color: string; abbr: strin
   { key: 'weibo', label: 'Weibo (微博)', abbr: 'WB', color: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400' },
 ];
 
-const isQRPlatform = (type: string) => type === 'feishu' || type === 'lark' || type === 'weixin';
+const supportsQRPlatform = (type: string) => type === 'feishu' || type === 'lark' || type === 'weixin';
+const supportsManualPlatform = (type: string) => !!platformMeta[type];
+const hasBothPlatformModes = (type: string) => supportsQRPlatform(type) && supportsManualPlatform(type);
 
 type Tab = 'overview' | 'providers' | 'heartbeat' | 'settings';
+type OptionValueType = 'string' | 'number' | 'boolean' | 'json';
+type OptionRow = {
+  id: string;
+  key: string;
+  type: OptionValueType;
+  value: string;
+};
+type PlatformOptionEditor = {
+  index: number;
+  type: string;
+  rows: OptionRow[];
+};
+type DifyInputRow = {
+  id: string;
+  key: string;
+  value: string;
+};
+
+const makeEntryId = () => `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+const DIFY_RESERVED_OPTION_KEYS = new Set(['base_url', 'api_key', 'app_mode', 'user', 'query_input_key', 'inputs']);
+const platformControlKey = (platformType: string, platformIndex: number) => `${platformType}#${platformIndex}`;
+
+function inferOptionType(value: any): OptionValueType {
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'boolean') return 'boolean';
+  if (value !== null && typeof value === 'object') return 'json';
+  return 'string';
+}
+
+function optionMapToRows(source?: Record<string, any>): OptionRow[] {
+  if (!source) return [];
+  return Object.entries(source).map(([key, value]) => {
+    const typ = inferOptionType(value);
+    return {
+      id: makeEntryId(),
+      key,
+      type: typ,
+      value: typ === 'json' ? JSON.stringify(value) : String(value),
+    };
+  });
+}
+
+function fieldTypeToOptionType(fieldType?: FieldDef['type']): OptionValueType {
+  if (fieldType === 'number') return 'number';
+  if (fieldType === 'boolean') return 'boolean';
+  return 'string';
+}
+
+function findPlatformField(platformType: string, key: string): FieldDef | undefined {
+  return platformMeta[platformType]?.fields.find(f => f.key === key);
+}
+
+function mergeTemplateRows(platformType: string, rows: OptionRow[]): OptionRow[] {
+  const meta = platformMeta[platformType];
+  if (!meta) return rows;
+  const byKey = new Map(rows.map(r => [r.key, r]));
+  const merged: OptionRow[] = [];
+  for (const field of meta.fields) {
+    const existing = byKey.get(field.key);
+    if (existing) {
+      merged.push(existing);
+      byKey.delete(field.key);
+      continue;
+    }
+    merged.push({
+      id: makeEntryId(),
+      key: field.key,
+      type: fieldTypeToOptionType(field.type),
+      value: '',
+    });
+  }
+  for (const row of rows) {
+    if (byKey.has(row.key)) {
+      merged.push(row);
+      byKey.delete(row.key);
+    }
+  }
+  return merged;
+}
+
+function sortRowsByTemplate(platformType: string, rows: OptionRow[]): OptionRow[] {
+  const meta = platformMeta[platformType];
+  if (!meta) return rows;
+  const order = new Map(meta.fields.map((f, i) => [f.key, i]));
+  return [...rows].sort((a, b) => {
+    const ai = order.has(a.key) ? order.get(a.key)! : Number.MAX_SAFE_INTEGER;
+    const bi = order.has(b.key) ? order.get(b.key)! : Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    return a.key.localeCompare(b.key);
+  });
+}
+
+function rowsToOptionMap(rows: OptionRow[]): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    const raw = row.value.trim();
+    if (row.type === 'string' && raw === '') continue;
+    if (row.type === 'number') {
+      if (raw === '') continue;
+      const n = Number(raw);
+      if (!Number.isNaN(n)) out[key] = n;
+      continue;
+    }
+    if (row.type === 'boolean') {
+      if (raw === '') continue;
+      out[key] = raw.toLowerCase() === 'true';
+      continue;
+    }
+    if (row.type === 'json') {
+      if (!raw) continue;
+      try {
+        out[key] = JSON.parse(raw);
+      } catch {
+        out[key] = raw;
+      }
+      continue;
+    }
+    out[key] = row.value;
+  }
+  return out;
+}
+
+function ensureDifyOptionRows(rows: OptionRow[], projectName?: string): OptionRow[] {
+  const next = [...rows];
+  const findIndexByKey = (key: string) => next.findIndex(r => r.key.trim() === key);
+  const ensure = (key: string, type: OptionValueType, defaultValue: string) => {
+    const idx = findIndexByKey(key);
+    if (idx >= 0) {
+      const current = next[idx];
+      next[idx] = { ...current, key, type };
+      return;
+    }
+    next.push({ id: makeEntryId(), key, type, value: defaultValue });
+  };
+  ensure('base_url', 'string', 'https://api.dify.ai/v1');
+  ensure('api_key', 'string', '');
+  ensure('app_mode', 'string', 'advanced-chat');
+  ensure('user', 'string', `cc-connect:${projectName || 'project'}`);
+  ensure('query_input_key', 'string', 'query');
+  ensure('inputs', 'json', '{}');
+  return next;
+}
+
+function parseDifyInputs(raw: string): Record<string, string> {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, any>)) {
+      const key = String(k).trim();
+      if (!key) continue;
+      out[key] = typeof v === 'string' ? v : JSON.stringify(v);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function buildDifyInputRows(rows: OptionRow[]): DifyInputRow[] {
+  const inputsRow = rows.find(r => r.key.trim() === 'inputs');
+  if (!inputsRow) {
+    return [{ id: makeEntryId(), key: '', value: '' }];
+  }
+  const map = parseDifyInputs(inputsRow.value);
+  const entries = Object.entries(map);
+  if (entries.length === 0) {
+    return [{ id: makeEntryId(), key: '', value: '' }];
+  }
+  return entries.map(([key, value]) => ({ id: makeEntryId(), key, value }));
+}
+
+function difyInputsToMap(rows: DifyInputRow[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    out[key] = row.value;
+  }
+  return out;
+}
+
+function normalizeJSONValue(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map(normalizeJSONValue);
+  }
+  if (value && typeof value === 'object') {
+    const sortedKeys = Object.keys(value).sort();
+    const out: Record<string, any> = {};
+    for (const key of sortedKeys) {
+      out[key] = normalizeJSONValue(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function jsonEqual(a: any, b: any): boolean {
+  return JSON.stringify(normalizeJSONValue(a)) === JSON.stringify(normalizeJSONValue(b));
+}
 
 export default function ProjectDetail() {
   const { t } = useTranslation();
@@ -53,11 +261,22 @@ export default function ProjectDetail() {
   const [replyFooter, setReplyFooter] = useState(true);
   const [injectSender, setInjectSender] = useState(false);
   const [platformAllowFrom, setPlatformAllowFrom] = useState<Record<string, string>>({});
+  const [platformAllowChat, setPlatformAllowChat] = useState<Record<string, string>>({});
+  const [agentOptionRows, setAgentOptionRows] = useState<OptionRow[]>([]);
+  const [difyInputs, setDifyInputs] = useState<DifyInputRow[]>([]);
+  const [platformOptionEditors, setPlatformOptionEditors] = useState<PlatformOptionEditor[]>([]);
+  const [removedPlatformIndexes, setRemovedPlatformIndexes] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+  const [lookupQuery, setLookupQuery] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupUsers, setLookupUsers] = useState<Array<{ open_id: string; name?: string; en_name?: string; nickname?: string }>>([]);
+  const [lookupChats, setLookupChats] = useState<Array<{ chat_id: string; name?: string }>>([]);
+  const [lookupWarnings, setLookupWarnings] = useState<string[]>([]);
 
   // Agent type
   const [agentTypes, setAgentTypes] = useState<string[]>([]);
   const [selectedAgentType, setSelectedAgentType] = useState('');
+  const isDifyAgent = selectedAgentType.trim().toLowerCase() === 'dify';
 
   // Global providers & refs
   const [globalProviders, setGlobalProviders] = useState<GlobalProvider[]>([]);
@@ -76,6 +295,7 @@ export default function ProjectDetail() {
   // Add platform
   const [showAddPlatform, setShowAddPlatform] = useState(false);
   const [addPlatType, setAddPlatType] = useState('');
+  const [addPlatMode, setAddPlatMode] = useState<'qr' | 'manual' | ''>('');
   const [showRestartModal, setShowRestartModal] = useState(false);
 
   // Delete project
@@ -139,11 +359,29 @@ export default function ProjectDetail() {
         setReplyFooter(proj.value.reply_footer !== false);
         setInjectSender(proj.value.inject_sender === true);
         setProviderRefs(proj.value.provider_refs || []);
+        const agentRows = optionMapToRows(proj.value.agent_options || {});
+        const normalizedAgentRows = (proj.value.agent_type || '').toLowerCase() === 'dify'
+          ? ensureDifyOptionRows(agentRows, proj.value.name || name)
+          : agentRows;
+        setAgentOptionRows(normalizedAgentRows);
+        setDifyInputs(buildDifyInputRows(normalizedAgentRows));
+        setPlatformOptionEditors((proj.value.platform_configs || []).map(pc => ({
+          index: pc.index ?? 0,
+          type: pc.type,
+          rows: mergeTemplateRows(pc.type, optionMapToRows(pc.options || {})),
+        })));
+        setRemovedPlatformIndexes([]);
         const afMap: Record<string, string> = {};
+        const acMap: Record<string, string> = {};
         proj.value.platform_configs?.forEach(pc => {
-          if (pc.allow_from !== undefined) afMap[pc.type] = pc.allow_from;
+          const key = platformControlKey(pc.type, pc.index ?? 0);
+          if (pc.allow_from !== undefined) afMap[key] = pc.allow_from;
+          if (pc.options && typeof pc.options.allow_chat === 'string') {
+            acMap[key] = pc.options.allow_chat;
+          }
         });
         setPlatformAllowFrom(afMap);
+        setPlatformAllowChat(acMap);
       }
       if (provs.status === 'fulfilled') {
         setProviders(provs.value.providers || []);
@@ -171,12 +409,72 @@ export default function ProjectDetail() {
     return () => window.removeEventListener('cc:refresh', handler);
   }, [fetchAll]);
 
+  useEffect(() => {
+    if (!isDifyAgent) {
+      setDifyInputs([]);
+      return;
+    }
+    const ensured = ensureDifyOptionRows(agentOptionRows, name || project?.name);
+    setAgentOptionRows(ensured);
+    setDifyInputs(buildDifyInputRows(ensured));
+    // intentionally runs when switching agent type/project only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDifyAgent, name]);
+
+  const hasFeishuLookup = !!project?.platform_configs?.some((pc) => {
+    const typ = (pc.type || '').toLowerCase();
+    return typ === 'feishu' || typ === 'lark';
+  });
+
+  const handleFeishuLookup = async () => {
+    if (!name || !lookupQuery.trim()) return;
+    setLookupLoading(true);
+    try {
+      const res = await lookupFeishuIds(name, lookupQuery.trim(), 20);
+      setLookupUsers(res.users || []);
+      setLookupChats(res.chats || []);
+      setLookupWarnings(res.warnings || []);
+    } catch (e: any) {
+      setLookupUsers([]);
+      setLookupChats([]);
+      setLookupWarnings([e?.message || String(e)]);
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
   const handleSaveSettings = async () => {
     if (!name) return;
     setSaving(true);
     try {
       const agentTypeChanged = project && selectedAgentType !== project.agent_type;
-      const res = await updateProject(name, {
+      const currentAgentOptions = rowsToOptionMap(agentOptionRows);
+      const originalAgentOptions = project?.agent_options || {};
+      const agentOptionsChanged = !jsonEqual(currentAgentOptions, originalAgentOptions);
+      const activePlatformConfigs = (project?.platform_configs || [])
+        .filter((pc) => !removedPlatformIndexes.includes(pc.index ?? -1));
+      const editorByIndex = new Map(platformOptionEditors.map((p) => [p.index, p]));
+      const platformOptionUpdates = activePlatformConfigs.map((pc) => {
+        const index = pc.index ?? 0;
+        const key = platformControlKey(pc.type, index);
+        const editor = editorByIndex.get(index);
+        const options = editor ? rowsToOptionMap(editor.rows) : { ...(pc.options || {}) };
+        const allowFrom = platformAllowFrom[key];
+        if (allowFrom !== undefined) options.allow_from = allowFrom.trim();
+        const allowChat = platformAllowChat[key];
+        if (allowChat !== undefined) {
+          const trimmed = allowChat.trim();
+          if (trimmed === '') {
+            delete options.allow_chat;
+          } else {
+            options.allow_chat = trimmed;
+          }
+        }
+        return { index, options, original: pc.options || {} };
+      }).filter((u) => !jsonEqual(u.options, u.original))
+        .map(({ index, options }) => ({ index, options }));
+
+      const payload: any = {
         language,
         admin_from: adminFrom,
         disabled_commands: disabledCmds.split(',').map(s => s.trim()).filter(Boolean),
@@ -186,8 +484,12 @@ export default function ProjectDetail() {
         show_context_indicator: showCtxIndicator,
         reply_footer: replyFooter,
         inject_sender: injectSender,
-        platform_allow_from: platformAllowFrom,
-      });
+      };
+      if (agentOptionsChanged) payload.agent_options = currentAgentOptions;
+      if (platformOptionUpdates.length > 0) payload.platform_option_updates = platformOptionUpdates;
+      if (removedPlatformIndexes.length > 0) payload.remove_platform_indexes = removedPlatformIndexes;
+
+      const res = await updateProject(name, payload);
       if (res && (res as any).restart_required) {
         setShowRestartModal(true);
         return;
@@ -212,6 +514,94 @@ export default function ProjectDetail() {
     setShowInterval(false);
     fetchAll();
   };
+
+  const newOptionRow = (): OptionRow => ({ id: makeEntryId(), key: '', type: 'string', value: '' });
+
+  const addAgentOptionRow = () => setAgentOptionRows(prev => [...prev, newOptionRow()]);
+  const updateAgentOptionRow = (id: string, patch: Partial<OptionRow>) => {
+    setAgentOptionRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
+  };
+  const removeAgentOptionRow = (id: string) => {
+    setAgentOptionRows(prev => prev.filter(r => r.id !== id));
+  };
+
+  const addPlatformOptionRow = (index: number) => {
+    setPlatformOptionEditors(prev => prev.map(p => (p.index === index ? { ...p, rows: [...p.rows, newOptionRow()] } : p)));
+  };
+  const updatePlatformOptionRow = (index: number, id: string, patch: Partial<OptionRow>) => {
+    setPlatformOptionEditors(prev => prev.map(p => (
+      p.index === index ? { ...p, rows: p.rows.map(r => (r.id === id ? { ...r, ...patch } : r)) } : p
+    )));
+  };
+  const removePlatformOptionRow = (index: number, id: string) => {
+    setPlatformOptionEditors(prev => prev.map(p => (
+      p.index === index ? { ...p, rows: p.rows.filter(r => r.id !== id) } : p
+    )));
+  };
+  const removePlatformFromProject = (index: number) => {
+    setRemovedPlatformIndexes(prev => (prev.includes(index) ? prev : [...prev, index]));
+    setPlatformOptionEditors(prev => prev.filter(p => p.index !== index));
+  };
+  const applyPlatformTemplate = (index: number, platformType: string) => {
+    setPlatformOptionEditors(prev => prev.map(p => (
+      p.index === index ? { ...p, rows: mergeTemplateRows(platformType, p.rows) } : p
+    )));
+  };
+  const initPlatformOptionEditors = () => {
+    if (!project?.platform_configs) return;
+    setPlatformOptionEditors(
+      project.platform_configs
+        .filter(pc => !removedPlatformIndexes.includes(pc.index ?? -1))
+        .map(pc => ({
+          index: pc.index ?? 0,
+          type: pc.type,
+          rows: mergeTemplateRows(pc.type, optionMapToRows(pc.options || {})),
+        }))
+    );
+  };
+
+  const upsertAgentOptionByKey = (key: string, value: string, type: OptionValueType = 'string') => {
+    setAgentOptionRows((prev) => {
+      const idx = prev.findIndex((row) => row.key.trim() === key);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], key, type, value };
+        return next;
+      }
+      return [...prev, { id: makeEntryId(), key, type, value }];
+    });
+  };
+
+  const getAgentOptionValue = (key: string, fallback = '') => {
+    const row = agentOptionRows.find((r) => r.key.trim() === key);
+    return row ? row.value : fallback;
+  };
+
+  const syncDifyInputs = (rows: DifyInputRow[]) => {
+    const inputsMap = difyInputsToMap(rows);
+    upsertAgentOptionByKey('inputs', JSON.stringify(inputsMap), 'json');
+  };
+  const addDifyInputRow = () => {
+    setDifyInputs((prev) => [...prev, { id: makeEntryId(), key: '', value: '' }]);
+  };
+  const updateDifyInputRow = (id: string, patch: Partial<DifyInputRow>) => {
+    setDifyInputs((prev) => {
+      const next = prev.map((row) => (row.id === id ? { ...row, ...patch } : row));
+      syncDifyInputs(next);
+      return next;
+    });
+  };
+  const removeDifyInputRow = (id: string) => {
+    setDifyInputs((prev) => {
+      const filtered = prev.filter((row) => row.id !== id);
+      const next = filtered.length > 0 ? filtered : [{ id: makeEntryId(), key: '', value: '' }];
+      syncDifyInputs(next);
+      return next;
+    });
+  };
+  const visibleAgentOptionRows = isDifyAgent
+    ? agentOptionRows.filter((row) => !DIFY_RESERVED_OPTION_KEYS.has(row.key.trim()))
+    : agentOptionRows;
 
   const tabs: { key: Tab; icon: React.ElementType }[] = [
     { key: 'overview', icon: Layers },
@@ -572,22 +962,316 @@ export default function ProjectDetail() {
           </div>
         </Card>
 
-        {/* Per-platform allow_from */}
-        {project.platform_configs && project.platform_configs.length > 0 && (
         <Card>
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">{t('projects.platformAccess', 'Platform access control')}</h3>
-          <div className="space-y-3 max-w-lg">
-            {project.platform_configs.map(pc => (
-              <Input
-                key={pc.type}
-                label={`${pc.type} — ${t('fields.allowFrom')}`}
-                value={platformAllowFrom[pc.type] ?? pc.allow_from ?? ''}
-                onChange={(e) => setPlatformAllowFrom(prev => ({ ...prev, [pc.type]: e.target.value }))}
-                placeholder='user1,user2 or *'
-              />
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('projects.dynamicConfig', 'Dynamic config')}</h3>
+            <Button size="sm" variant="secondary" onClick={addAgentOptionRow}>
+              <Plus size={13} /> {t('projects.addAgentOption', 'Add agent option')}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {t('projects.dynamicConfigHint', 'Edit [[projects]] -> [projects.agent.options] and [projects.platforms.options] directly. Saving these fields requires restart.')}
+          </p>
+          {isDifyAgent && (
+            <div className="mb-4 rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Dify options</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Input
+                  label="base_url *"
+                  value={getAgentOptionValue('base_url', 'https://api.dify.ai/v1')}
+                  onChange={(e) => upsertAgentOptionByKey('base_url', e.target.value)}
+                  placeholder="https://api.dify.ai/v1"
+                />
+                <Input
+                  label="api_key *"
+                  type="password"
+                  value={getAgentOptionValue('api_key')}
+                  onChange={(e) => upsertAgentOptionByKey('api_key', e.target.value)}
+                  placeholder="app-***"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">app_mode</label>
+                  <select
+                    value={getAgentOptionValue('app_mode', 'advanced-chat')}
+                    onChange={(e) => upsertAgentOptionByKey('app_mode', e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  >
+                    <option value="advanced-chat">advanced-chat</option>
+                    <option value="chat">chat</option>
+                    <option value="completion">completion</option>
+                    <option value="workflow">workflow</option>
+                  </select>
+                </div>
+                <Input
+                  label="user"
+                  value={getAgentOptionValue('user', `cc-connect:${name || 'project'}`)}
+                  onChange={(e) => upsertAgentOptionByKey('user', e.target.value)}
+                  placeholder="cc-connect:my-backend"
+                />
+                <Input
+                  label="query_input_key"
+                  value={getAgentOptionValue('query_input_key', 'query')}
+                  onChange={(e) => upsertAgentOptionByKey('query_input_key', e.target.value)}
+                  placeholder="query"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400">inputs (dynamic)</p>
+                  <Button size="sm" variant="secondary" onClick={addDifyInputRow}>
+                    <Plus size={12} /> {t('common.add', 'Add')}
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {difyInputs.map((row) => (
+                    <div key={row.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                      <Input
+                        label="key"
+                        value={row.key}
+                        onChange={(e) => updateDifyInputRow(row.id, { key: e.target.value })}
+                        placeholder="tenant"
+                      />
+                      <Input
+                        label="value"
+                        value={row.value}
+                        onChange={(e) => updateDifyInputRow(row.id, { value: e.target.value })}
+                        placeholder="ops"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeDifyInputRow(row.id)}
+                        className="h-9 w-9 mb-[1px] rounded-lg border border-gray-300 dark:border-gray-700 text-gray-500 hover:text-red-500 hover:border-red-300"
+                        aria-label="remove dify input row"
+                      >
+                        <Trash2 size={14} className="mx-auto" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="space-y-2 mb-4">
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{t('projects.agentOptions', 'Agent options')}</p>
+            {visibleAgentOptionRows.length === 0 ? (
+              <p className="text-xs text-gray-400">{t('projects.noAgentOptions', 'No options. Click "Add agent option".')}</p>
+            ) : visibleAgentOptionRows.map(row => (
+              <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                <input
+                  value={row.key}
+                  onChange={(e) => updateAgentOptionRow(row.id, { key: e.target.value })}
+                  placeholder="key"
+                  className="col-span-4 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                />
+                <select
+                  value={row.type}
+                  onChange={(e) => updateAgentOptionRow(row.id, { type: e.target.value as OptionValueType })}
+                  className="col-span-3 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                >
+                  <option value="string">string</option>
+                  <option value="number">number</option>
+                  <option value="boolean">boolean</option>
+                  <option value="json">json</option>
+                </select>
+                {row.type === 'boolean' ? (
+                  <select
+                    value={row.value.toLowerCase() === 'true' ? 'true' : 'false'}
+                    onChange={(e) => updateAgentOptionRow(row.id, { value: e.target.value })}
+                    className="col-span-4 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                ) : (
+                  <input
+                    value={row.value}
+                    onChange={(e) => updateAgentOptionRow(row.id, { value: e.target.value })}
+                    placeholder={row.type === 'json' ? '{"k":"v"}' : 'value'}
+                    className="col-span-4 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                )}
+                <Button size="sm" variant="ghost" className="col-span-1 text-red-500" onClick={() => removeAgentOptionRow(row.id)}>
+                  <Trash2 size={14} />
+                </Button>
+              </div>
             ))}
           </div>
+          <div className="space-y-3">
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{t('projects.platformOptions', 'Platform options')}</p>
+            {platformOptionEditors.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 p-3">
+                <p className="text-xs text-gray-400 mb-2">{t('projects.noPlatformOptions', 'No platform option blocks available.')}</p>
+                {(project.platform_configs?.length || 0) > 0 && (
+                  <Button size="sm" variant="secondary" onClick={initPlatformOptionEditors}>
+                    <Plus size={12} /> {t('projects.initPlatformOptions', 'Initialize platform options')}
+                  </Button>
+                )}
+              </div>
+            ) : platformOptionEditors.map(p => {
+              const rows = sortRowsByTemplate(p.type, p.rows);
+              const hasTemplate = !!platformMeta[p.type];
+              return (
+              <div key={`${p.type}-${p.index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{p.type} #{p.index}</p>
+                  <div className="flex items-center gap-2">
+                    {hasTemplate && (
+                      <Button size="sm" variant="secondary" onClick={() => applyPlatformTemplate(p.index, p.type)}>
+                        {t('projects.useTemplateFields', 'Use template fields')}
+                      </Button>
+                    )}
+                    <Button size="sm" variant="secondary" onClick={() => addPlatformOptionRow(p.index)}>
+                      <Plus size={12} /> {t('common.add', 'Add')}
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-red-500" onClick={() => removePlatformFromProject(p.index)}>
+                      <Trash2 size={13} /> {t('common.delete')}
+                    </Button>
+                  </div>
+                </div>
+                {rows.length === 0 ? (
+                  <p className="text-xs text-gray-400">{t('projects.noPlatformOptionEntries', 'No options. Click Add.')}</p>
+                ) : rows.map(row => {
+                  const fieldDef = findPlatformField(p.type, row.key);
+                  return (
+                  <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                    <input
+                      value={row.key}
+                      onChange={(e) => updatePlatformOptionRow(p.index, row.id, { key: e.target.value })}
+                      placeholder={fieldDef?.key || 'key'}
+                      className="col-span-4 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    />
+                    <select
+                      value={row.type}
+                      onChange={(e) => updatePlatformOptionRow(p.index, row.id, { type: e.target.value as OptionValueType })}
+                      className="col-span-3 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    >
+                      <option value="string">string</option>
+                      <option value="number">number</option>
+                      <option value="boolean">boolean</option>
+                      <option value="json">json</option>
+                    </select>
+                    {row.type === 'boolean' ? (
+                      <select
+                        value={row.value.toLowerCase() === 'true' ? 'true' : 'false'}
+                        onChange={(e) => updatePlatformOptionRow(p.index, row.id, { value: e.target.value })}
+                        className="col-span-4 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      >
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </select>
+                    ) : (
+                      <input
+                        value={row.value}
+                        onChange={(e) => updatePlatformOptionRow(p.index, row.id, { value: e.target.value })}
+                        placeholder={row.type === 'json' ? '{"k":"v"}' : (fieldDef?.placeholder || 'value')}
+                        className="col-span-4 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    )}
+                    <Button size="sm" variant="ghost" className="col-span-1 text-red-500" onClick={() => removePlatformOptionRow(p.index, row.id)}>
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                )})}
+              </div>
+            )})}
+          </div>
         </Card>
+
+        {/* Per-platform access control */}
+        {project.platform_configs && project.platform_configs.length > 0 && (
+          <Card>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">{t('projects.platformAccess', 'Platform access control')}</h3>
+            <div className="space-y-3 max-w-lg">
+              {project.platform_configs
+                .filter(pc => !removedPlatformIndexes.includes(pc.index ?? -1))
+                .map(pc => {
+                  const idx = pc.index ?? 0;
+                  const key = platformControlKey(pc.type, idx);
+                  const typ = (pc.type || '').toLowerCase();
+                  const canSetChat = typ === 'feishu' || typ === 'lark';
+                  return (
+                    <div key={`${pc.type}-${idx}`} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{pc.type} #{idx}</p>
+                      <Input
+                        label={t('fields.allowFrom')}
+                        value={platformAllowFrom[key] ?? pc.allow_from ?? ''}
+                        onChange={(e) => setPlatformAllowFrom(prev => ({ ...prev, [key]: e.target.value }))}
+                        placeholder="user_open_id_1,user_open_id_2 or *"
+                      />
+                      {canSetChat && (
+                        <Input
+                          label={t('fields.allowChat', 'Allowed chats')}
+                          value={platformAllowChat[key] ?? (typeof pc.options?.allow_chat === 'string' ? pc.options.allow_chat : '')}
+                          onChange={(e) => setPlatformAllowChat(prev => ({ ...prev, [key]: e.target.value }))}
+                          placeholder="oc_xxx,oc_yyy"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+            {hasFeishuLookup && (
+              <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">
+                  {t('projects.feishuLookup', 'Feishu 人/群 ID 查询')}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  {t('projects.feishuLookupHint', '输入人名或群名，查询 open_id / chat_id，用于 allow_from / allow_chat。')}
+                </p>
+                <div className="flex gap-2 max-w-xl">
+                  <input
+                    value={lookupQuery}
+                    onChange={(e) => setLookupQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleFeishuLookup(); }}
+                    placeholder={t('projects.feishuLookupPlaceholder', '例如：张三 / 运维群')}
+                    className="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                  <Button size="sm" onClick={handleFeishuLookup} loading={lookupLoading}>
+                    {t('common.search', 'Search')}
+                  </Button>
+                </div>
+                {lookupWarnings.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {lookupWarnings.map((w, i) => (
+                      <p key={`${w}-${i}`} className="text-xs text-amber-600 dark:text-amber-400">{w}</p>
+                    ))}
+                  </div>
+                )}
+                {(lookupUsers.length > 0 || lookupChats.length > 0) && (
+                  <div className="mt-3 space-y-3">
+                    {lookupUsers.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Users</p>
+                        <div className="space-y-1">
+                          {lookupUsers.map((u) => (
+                            <div key={u.open_id} className="text-xs rounded border border-gray-200 dark:border-gray-700 px-2 py-1 bg-gray-50/70 dark:bg-gray-900/40">
+                              <span className="font-medium text-gray-800 dark:text-gray-100">{u.name || u.en_name || u.nickname || '(unknown)'}</span>
+                              <span className="text-gray-500 dark:text-gray-400 ml-2">{u.open_id}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {lookupChats.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Chats</p>
+                        <div className="space-y-1">
+                          {lookupChats.map((c) => (
+                            <div key={c.chat_id} className="text-xs rounded border border-gray-200 dark:border-gray-700 px-2 py-1 bg-gray-50/70 dark:bg-gray-900/40">
+                              <span className="font-medium text-gray-800 dark:text-gray-100">{c.name || '(unnamed chat)'}</span>
+                              <span className="text-gray-500 dark:text-gray-400 ml-2">{c.chat_id}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
         )}
 
         <div className="max-w-lg">
@@ -624,7 +1308,11 @@ export default function ProjectDetail() {
       </Modal>
 
       {/* Add Platform Modal */}
-      <Modal open={showAddPlatform} onClose={() => setShowAddPlatform(false)} title={t('setup.addPlatform', 'Add platform')}>
+      <Modal
+        open={showAddPlatform}
+        onClose={() => { setShowAddPlatform(false); setAddPlatType(''); setAddPlatMode(''); }}
+        title={t('setup.addPlatform', 'Add platform')}
+      >
         {!addPlatType ? (
           <div className="space-y-3 py-2">
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
@@ -634,7 +1322,18 @@ export default function ProjectDetail() {
               {PLATFORM_OPTIONS.map(({ key, label, color, qr, abbr }) => (
                 <button
                   key={key}
-                  onClick={() => setAddPlatType(key)}
+                  onClick={() => {
+                    setAddPlatType(key);
+                    if (hasBothPlatformModes(key)) {
+                      setAddPlatMode('');
+                    } else if (supportsQRPlatform(key)) {
+                      setAddPlatMode('qr');
+                    } else if (supportsManualPlatform(key)) {
+                      setAddPlatMode('manual');
+                    } else {
+                      setAddPlatMode('');
+                    }
+                  }}
                   className="flex items-center gap-2.5 p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-accent/50 hover:bg-accent/5 transition-all text-left"
                 >
                   <div className={`w-9 h-9 rounded-lg ${color} flex items-center justify-center shrink-0 font-bold text-xs`}>
@@ -643,39 +1342,94 @@ export default function ProjectDetail() {
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{label}</div>
                     <div className="text-[11px] text-gray-400">
-                      {qr ? t('setup.scanToConnect', 'Scan QR code') : t('setup.manualSetup', 'Manual setup')}
+                      {hasBothPlatformModes(key)
+                        ? t('setup.scanOrManual', 'QR or manual')
+                        : qr ? t('setup.scanToConnect', 'Scan QR code') : t('setup.manualSetup', 'Manual setup')}
                     </div>
                   </div>
                 </button>
               ))}
             </div>
           </div>
-        ) : isQRPlatform(addPlatType) ? (
+        ) : addPlatMode === '' && hasBothPlatformModes(addPlatType) ? (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+              {t('setup.chooseConnectionMode', 'Choose connection mode:')}
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                onClick={() => setAddPlatMode('qr')}
+                className="flex items-center justify-between p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-accent/50 hover:bg-accent/5 transition-all text-left"
+              >
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">{t('setup.scanToConnect', 'Scan QR code')}</div>
+                  <div className="text-[11px] text-gray-400">{t('setup.scanModeHint', 'Connect quickly by scanning on phone')}</div>
+                </div>
+                <Settings size={16} className="text-gray-400" />
+              </button>
+              <button
+                onClick={() => setAddPlatMode('manual')}
+                className="flex items-center justify-between p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-accent/50 hover:bg-accent/5 transition-all text-left"
+              >
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">{t('setup.manualSetup', 'Manual setup')}</div>
+                  <div className="text-[11px] text-gray-400">{t('setup.manualModeHint', 'Fill in app credentials manually')}</div>
+                </div>
+                <Plug size={16} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="flex justify-start pt-2">
+              <Button variant="secondary" onClick={() => { setAddPlatType(''); setAddPlatMode(''); }}>
+                {t('common.back')}
+              </Button>
+            </div>
+          </div>
+        ) : addPlatMode === 'qr' && supportsQRPlatform(addPlatType) ? (
           <PlatformSetupQR
             platformType={addPlatType as 'feishu' | 'weixin'}
             projectName={name!}
-            onComplete={() => {
+            onComplete={(restarted) => {
               setShowAddPlatform(false);
-              setShowRestartModal(true);
+              setAddPlatType('');
+              setAddPlatMode('');
+              if (!restarted) {
+                setShowRestartModal(true);
+              } else {
+                fetchAll();
+              }
             }}
-            onCancel={() => setAddPlatType('')}
+            onCancel={() => {
+              if (hasBothPlatformModes(addPlatType)) {
+                setAddPlatMode('');
+              } else {
+                setAddPlatType('');
+              }
+            }}
           />
-        ) : platformMeta[addPlatType] ? (
+        ) : addPlatMode === 'manual' && platformMeta[addPlatType] ? (
           <PlatformManualForm
             platformType={addPlatType}
             projectName={name!}
             onComplete={() => {
               setShowAddPlatform(false);
+              setAddPlatType('');
+              setAddPlatMode('');
               setShowRestartModal(true);
             }}
-            onCancel={() => setAddPlatType('')}
+            onCancel={() => {
+              if (hasBothPlatformModes(addPlatType)) {
+                setAddPlatMode('');
+              } else {
+                setAddPlatType('');
+              }
+            }}
           />
         ) : (
           <div className="space-y-4 py-4 text-center">
             <p className="text-sm text-gray-600 dark:text-gray-400">
               {t('setup.manualHint', 'For {{platform}}, please configure credentials in config.toml and restart the service.', { platform: PLATFORM_OPTIONS.find(o => o.key === addPlatType)?.label || addPlatType })}
             </p>
-            <Button variant="secondary" onClick={() => setAddPlatType('')}>{t('common.back')}</Button>
+            <Button variant="secondary" onClick={() => { setAddPlatType(''); setAddPlatMode(''); }}>{t('common.back')}</Button>
           </div>
         )}
       </Modal>

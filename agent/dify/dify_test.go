@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func TestSessionChatFlowSendUsesConversationID(t *testing.T) {
@@ -71,6 +71,11 @@ func TestSessionChatFlowSendUsesConversationID(t *testing.T) {
 	if _, ok := firstBody["conversation_id"]; ok {
 		t.Fatalf("first request unexpectedly sent conversation_id: %#v", firstBody["conversation_id"])
 	}
+	if inputs, ok := firstBody["inputs"].(map[string]any); !ok {
+		t.Fatalf("first request inputs type = %T, want object", firstBody["inputs"])
+	} else if len(inputs) != 0 {
+		t.Fatalf("first request inputs = %#v, want empty object", inputs)
+	}
 
 	if err := s.Send("second", nil, nil); err != nil {
 		t.Fatalf("Send(second) error = %v", err)
@@ -79,6 +84,11 @@ func TestSessionChatFlowSendUsesConversationID(t *testing.T) {
 
 	if got, _ := secondBody["conversation_id"].(string); got != "conv-123" {
 		t.Fatalf("second request conversation_id = %q, want conv-123", got)
+	}
+	if inputs, ok := secondBody["inputs"].(map[string]any); !ok {
+		t.Fatalf("second request inputs type = %T, want object", secondBody["inputs"])
+	} else if len(inputs) != 0 {
+		t.Fatalf("second request inputs = %#v, want empty object", inputs)
 	}
 }
 
@@ -160,9 +170,9 @@ func TestListSessionsReturnsConversationSummaries(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": []any{
 					map[string]any{
-						"id":          "conv-2",
-						"name":        "second",
-						"updated_at":  1705407630,
+						"id":           "conv-2",
+						"name":         "second",
+						"updated_at":   1705407630,
 						"introduction": "",
 					},
 					map[string]any{

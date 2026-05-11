@@ -247,8 +247,8 @@ const (
 	MsgCronBtnUnmute    MsgKey = "cron_btn_unmute"
 	MsgCronBtnDelete    MsgKey = "cron_btn_delete"
 
-	MsgStatusTitle          MsgKey = "status_title"
-	MsgReplyFooterRemaining MsgKey = "reply_footer_remaining"
+	MsgStatusTitle           MsgKey = "status_title"
+	MsgReplyFooterRemaining  MsgKey = "reply_footer_remaining"
 	MsgModelCurrent          MsgKey = "model_current"
 	MsgModelChanged          MsgKey = "model_changed"
 	MsgModelChangeFailed     MsgKey = "model_change_failed"
@@ -440,10 +440,10 @@ const (
 	MsgCommandDisabled   MsgKey = "command_disabled"
 	MsgAdminRequired     MsgKey = "admin_required"
 	MsgRateLimited       MsgKey = "rate_limited"
-	MsgPsSent       MsgKey = "ps_sent"
-	MsgPsSendFailed MsgKey = "ps_send_failed"
-	MsgPsEmpty      MsgKey = "ps_empty"
-	MsgPsNoSession  MsgKey = "ps_no_session"
+	MsgPsSent            MsgKey = "ps_sent"
+	MsgPsSendFailed      MsgKey = "ps_send_failed"
+	MsgPsEmpty           MsgKey = "ps_empty"
+	MsgPsNoSession       MsgKey = "ps_no_session"
 
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
@@ -506,6 +506,7 @@ const (
 	MsgBuiltinCmdVersion   MsgKey = "version"
 	MsgBuiltinCmdHelp      MsgKey = "help"
 	MsgBuiltinCmdBind      MsgKey = "bind"
+	MsgBuiltinCmdProject   MsgKey = "project"
 	MsgBuiltinCmdShell     MsgKey = "shell"
 	MsgBuiltinCmdDir       MsgKey = "dir"
 	MsgBuiltinCmdDiff      MsgKey = "diff"
@@ -3440,6 +3441,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "綁定當前會話到目標，參數: <目標>",
 		LangJapanese:           "現在のセッションをターゲットにバインド、引数: <ターゲット>",
 		LangSpanish:            "Vincular sesión actual a un objetivo, arg: <objetivo>",
+	},
+	MsgBuiltinCmdProject: {
+		LangEnglish:            "Switch relay target project, arg: switch <project>",
+		LangChinese:            "切换中继目标项目，参数: switch <项目名>",
+		LangTraditionalChinese: "切換中繼目標專案，參數: switch <專案名>",
+		LangJapanese:           "中継先プロジェクトを切り替え、引数: switch <project>",
+		LangSpanish:            "Cambiar proyecto objetivo del relay, arg: switch <proyecto>",
 	},
 	MsgBuiltinCmdShell: {
 		LangEnglish:            "Run a shell command, arg: <command>",

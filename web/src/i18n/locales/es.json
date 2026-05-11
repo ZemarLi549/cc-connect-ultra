@@ -165,8 +165,8 @@
     "rawConfig": "Config. sin procesar"
   },
   "login": {
-    "title": "\u7384\u661fOps Admin",
-    "subtitle": "Con\u00e9ctese a su instancia de \u7384\u661fOps",
+    "title": "\u7384\u661fRobot Admin",
+    "subtitle": "Con\u00e9ctese a su instancia de \u7384\u661fRobot",
     "token": "Token de API",
     "serverUrl": "URL del servidor",
     "connect": "Conectar",
@@ -232,8 +232,10 @@
     "appToken": "Token de la app",
     "accessToken": "Token de acceso",
     "allowFrom": "Usuarios permitidos",
+    "allowChat": "Chats permitidos",
     "allowFromHintTelegram": "IDs de usuario de Telegram, separados por comas",
     "groupReplyAll": "Responder a todos los mensajes del grupo",
+    "groupOnly": "Solo grupos",
     "sharedGroupSession": "Sesión de grupo compartida",
     "sharedChannelSession": "Sesión de canal compartida",
     "guildId": "ID del servidor",

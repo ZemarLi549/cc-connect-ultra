@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func decodeRenderedCard(t *testing.T, card *core.Card) map[string]any {

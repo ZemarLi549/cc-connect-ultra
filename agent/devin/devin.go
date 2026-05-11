@@ -27,8 +27,8 @@ package devin
 import (
 	"strings"
 
-	"github.com/chenhg5/cc-connect/agent/acp"
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/agent/acp"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func init() {

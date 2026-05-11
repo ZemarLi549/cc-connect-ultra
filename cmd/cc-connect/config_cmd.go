@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	ccconnect "github.com/chenhg5/cc-connect"
-	"github.com/chenhg5/cc-connect/config"
+	ccconnect "github.com/ZemarLi549/cc-connect-ultra"
+	"github.com/ZemarLi549/cc-connect-ultra/config"
 )
 
 func runConfig(args []string) {

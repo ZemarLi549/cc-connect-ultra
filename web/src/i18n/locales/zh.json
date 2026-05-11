@@ -165,8 +165,8 @@
     "rawConfig": "原始配置"
   },
   "login": {
-    "title": "\u7384\u661fOps \u7ba1\u7406\u540e\u53f0",
-    "subtitle": "\u8fde\u63a5\u5230\u60a8\u7684\u7384\u661fOps\u5b9e\u4f8b",
+    "title": "\u7384\u661fRobot \u7ba1\u7406\u540e\u53f0",
+    "subtitle": "\u8fde\u63a5\u5230\u60a8\u7684\u7384\u661fRobot\u5b9e\u4f8b",
     "token": "API 令牌",
     "serverUrl": "服务器地址",
     "connect": "连接",
@@ -232,8 +232,10 @@
     "appToken": "App Token",
     "accessToken": "访问令牌",
     "allowFrom": "允许的用户",
+    "allowChat": "允许的群聊",
     "allowFromHintTelegram": "Telegram 用户 ID，逗号分隔",
     "groupReplyAll": "回复所有群消息",
+    "groupOnly": "仅群聊",
     "sharedGroupSession": "共享群会话",
     "sharedChannelSession": "共享频道会话",
     "guildId": "服务器 ID",

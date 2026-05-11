@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 type Session struct {
@@ -125,8 +125,9 @@ func (s *Session) resolveMode() (string, string, error) {
 }
 
 func (s *Session) sendChat(prompt string) (difyBlockingResponse, error) {
+	inputs := normalizeInputs(s.cfg.inputs)
 	body := map[string]any{
-		"inputs":             cloneAnyMap(s.cfg.inputs),
+		"inputs":             inputs,
 		"query":              prompt,
 		"response_mode":      "blocking",
 		"user":               s.cfg.user,
@@ -149,11 +150,8 @@ func (s *Session) sendChat(prompt string) (difyBlockingResponse, error) {
 }
 
 func (s *Session) sendCompletion(prompt, queryInputKey string) (difyBlockingResponse, error) {
-	inputs := cloneAnyMap(s.cfg.inputs)
+	inputs := normalizeInputs(s.cfg.inputs)
 	if queryInputKey != "" {
-		if inputs == nil {
-			inputs = make(map[string]any, 1)
-		}
 		inputs[queryInputKey] = prompt
 	}
 	return doJSON[difyBlockingResponse](s.ctx, s.cfg.client, s.cfg, "POST", "/completion-messages", nil, map[string]any{
@@ -165,10 +163,7 @@ func (s *Session) sendCompletion(prompt, queryInputKey string) (difyBlockingResp
 }
 
 func (s *Session) sendWorkflow(prompt, queryInputKey string) (string, int, error) {
-	inputs := cloneAnyMap(s.cfg.inputs)
-	if inputs == nil {
-		inputs = make(map[string]any, 1)
-	}
+	inputs := normalizeInputs(s.cfg.inputs)
 	if queryInputKey != "" {
 		inputs[queryInputKey] = prompt
 	} else if strings.TrimSpace(prompt) != "" {
@@ -189,6 +184,14 @@ func (s *Session) sendWorkflow(prompt, queryInputKey string) (string, int, error
 		return "", resp.Data.TotalTokens, fmt.Errorf("dify: workflow error: %v", resp.Data.Error)
 	}
 	return workflowOutputsText(resp.Data.Outputs), resp.Data.TotalTokens, nil
+}
+
+func normalizeInputs(in map[string]any) map[string]any {
+	out := cloneAnyMap(in)
+	if out == nil {
+		return map[string]any{}
+	}
+	return out
 }
 
 func workflowOutputsText(outputs map[string]any) string {
@@ -232,7 +235,7 @@ func stringifyValue(v any) string {
 }
 
 func (s *Session) RespondPermission(_ string, _ core.PermissionResult) error { return nil }
-func (s *Session) Events() <-chan core.Event                               { return s.events }
+func (s *Session) Events() <-chan core.Event                                 { return s.events }
 
 func (s *Session) CurrentSessionID() string {
 	if v, ok := s.conversationID.Load().(string); ok {

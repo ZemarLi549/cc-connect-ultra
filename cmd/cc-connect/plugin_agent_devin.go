@@ -2,4 +2,4 @@
 
 package main
 
-import _ "github.com/chenhg5/cc-connect/agent/devin"
+import _ "github.com/ZemarLi549/cc-connect-ultra/agent/devin"

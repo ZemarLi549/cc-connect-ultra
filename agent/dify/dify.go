@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func init() {
@@ -24,6 +24,7 @@ func init() {
 const defaultConversationLimit = 100
 
 type Agent struct {
+	project            string
 	workDir            string
 	baseURL            string
 	apiKey             string
@@ -66,6 +67,7 @@ func New(opts map[string]any) (core.Agent, error) {
 	timeout := durationOpt(opts["timeout_secs"], 110*time.Second)
 
 	return &Agent{
+		project:            strings.TrimSpace(project),
 		workDir:            workDir,
 		baseURL:            normalizeBaseURL(baseURL),
 		apiKey:             strings.TrimSpace(apiKey),
@@ -147,6 +149,7 @@ func (a *Agent) ListProviders() []core.ProviderConfig {
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
 	a.mu.RLock()
 	cfg := runtimeConfig{
+		project:          a.project,
 		workDir:          a.workDir,
 		baseURL:          a.baseURL,
 		apiKey:           a.apiKey,
@@ -282,6 +285,7 @@ func (a *Agent) runtimeConfigForReadOnly() (runtimeConfig, error) {
 		return runtimeConfig{}, fmt.Errorf("dify: list/history/delete are unavailable when user_from_session_key = true")
 	}
 	cfg := runtimeConfig{
+		project:          a.project,
 		baseURL:          a.baseURL,
 		apiKey:           a.apiKey,
 		appMode:          a.appMode,
@@ -303,12 +307,13 @@ func (a *Agent) runtimeConfigForReadOnly() (runtimeConfig, error) {
 		}
 	}
 	if cfg.baseURL == "" || cfg.apiKey == "" {
-		return runtimeConfig{}, fmt.Errorf("dify: base_url and api_key are required")
+		return runtimeConfig{}, requiredDifyConfigError(cfg.project)
 	}
 	return cfg, nil
 }
 
 type runtimeConfig struct {
+	project          string
 	workDir          string
 	baseURL          string
 	apiKey           string
@@ -416,7 +421,7 @@ func fetchQueryInputKey(ctx context.Context, cfg runtimeConfig) (string, error) 
 func doJSON[T any](ctx context.Context, client *http.Client, cfg runtimeConfig, method, path string, query map[string]string, body any) (T, error) {
 	var zero T
 	if strings.TrimSpace(cfg.baseURL) == "" || strings.TrimSpace(cfg.apiKey) == "" {
-		return zero, fmt.Errorf("dify: base_url and api_key are required")
+		return zero, requiredDifyConfigError(cfg.project)
 	}
 	reqURL, err := buildURL(cfg.baseURL, path, query)
 	if err != nil {
@@ -455,7 +460,7 @@ func doJSON[T any](ctx context.Context, client *http.Client, cfg runtimeConfig, 
 
 func doNoContent(ctx context.Context, client *http.Client, cfg runtimeConfig, method, path string, query map[string]string, body any) error {
 	if strings.TrimSpace(cfg.baseURL) == "" || strings.TrimSpace(cfg.apiKey) == "" {
-		return fmt.Errorf("dify: base_url and api_key are required")
+		return requiredDifyConfigError(cfg.project)
 	}
 	reqURL, err := buildURL(cfg.baseURL, path, query)
 	if err != nil {
@@ -503,6 +508,14 @@ func decodeAPIError(resp *http.Response) error {
 		msg = resp.Status
 	}
 	return fmt.Errorf("dify: %s", msg)
+}
+
+func requiredDifyConfigError(projectName string) error {
+	pn := strings.TrimSpace(projectName)
+	if pn == "" {
+		return fmt.Errorf("dify: base_url and api_key are required; if config was updated, restart service and create a new session")
+	}
+	return fmt.Errorf("dify: base_url and api_key are required (project=%s); if config was updated, restart service and create a new session", pn)
 }
 
 func buildURL(baseURL, path string, query map[string]string) (string, error) {

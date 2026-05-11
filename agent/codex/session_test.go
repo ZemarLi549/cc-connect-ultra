@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func TestNormalizeReasoningEffort_RejectsMinimal(t *testing.T) {

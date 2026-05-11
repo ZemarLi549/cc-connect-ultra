@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"

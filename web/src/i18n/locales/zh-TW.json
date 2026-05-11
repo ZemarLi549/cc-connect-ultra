@@ -165,8 +165,8 @@
     "rawConfig": "原始設定"
   },
   "login": {
-    "title": "\u7384\u661fOps \u7ba1\u7406\u5f8c\u53f0",
-    "subtitle": "\u9023\u7dda\u81f3\u60a8\u7684\u7384\u661fOps\u57f7\u884c\u500b\u9ad4",
+    "title": "\u7384\u661fRobot \u7ba1\u7406\u5f8c\u53f0",
+    "subtitle": "\u9023\u7dda\u81f3\u60a8\u7684\u7384\u661fRobot\u57f7\u884c\u500b\u9ad4",
     "token": "API 權杖",
     "serverUrl": "伺服器位址",
     "connect": "連線",
@@ -232,8 +232,10 @@
     "appToken": "App Token",
     "accessToken": "存取權杖",
     "allowFrom": "允許的使用者",
+    "allowChat": "允許的群組",
     "allowFromHintTelegram": "Telegram 使用者 ID，以逗號分隔",
     "groupReplyAll": "回覆所有群組訊息",
+    "groupOnly": "僅群組",
     "sharedGroupSession": "共享群組工作階段",
     "sharedChannelSession": "共享頻道工作階段",
     "guildId": "伺服器 ID",

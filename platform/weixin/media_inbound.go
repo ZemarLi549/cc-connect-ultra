@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func imageDecryptMaterial(img *imageItem) (encParam, aesKeyBase64 string, ok bool) {

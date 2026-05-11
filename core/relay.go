@@ -142,6 +142,23 @@ func (rm *RelayManager) HasEngine(name string) bool {
 	return ok
 }
 
+// EngineHasPlatform reports whether the named project engine is registered and
+// has a platform with the given name.
+func (rm *RelayManager) EngineHasPlatform(name, platform string) bool {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	e := rm.engines[name]
+	if e == nil {
+		return false
+	}
+	for _, p := range e.platforms {
+		if strings.EqualFold(p.Name(), platform) {
+			return true
+		}
+	}
+	return false
+}
+
 // ListEngineNames returns all registered engine names.
 func (rm *RelayManager) ListEngineNames() []string {
 	rm.mu.RLock()

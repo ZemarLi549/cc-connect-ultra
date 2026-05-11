@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 
 	"github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 	"github.com/line/line-bot-sdk-go/v8/linebot/webhook"

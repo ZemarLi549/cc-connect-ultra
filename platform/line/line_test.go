@@ -3,7 +3,7 @@ package line
 import (
 	"testing"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func TestPlatform_Name(t *testing.T) {

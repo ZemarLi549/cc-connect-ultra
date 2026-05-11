@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 // --- Agent: mode cache & SetMode/GetMode ---------------------------

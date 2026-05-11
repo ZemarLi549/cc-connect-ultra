@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 	"github.com/gorilla/websocket"
 )
 

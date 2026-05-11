@@ -3,7 +3,7 @@ package claudecode
 import (
 	"testing"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 func TestConfiguredModels_BoundaryConditions(t *testing.T) {

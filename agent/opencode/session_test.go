@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/chenhg5/cc-connect/core"
+	"github.com/ZemarLi549/cc-connect-ultra/core"
 )
 
 // TestOpencodeSessionEntry_Unmarshal verifies that OpenCode's

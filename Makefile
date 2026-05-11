@@ -1,5 +1,5 @@
 APP        := cc-connect
-MODULE     := github.com/chenhg5/cc-connect
+MODULE     := github.com/ZemarLi549/cc-connect-ultra
 CMD        := ./cmd/cc-connect
 DIST       := dist
 

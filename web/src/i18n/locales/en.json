@@ -165,8 +165,8 @@
     "rawConfig": "Raw Config"
   },
   "login": {
-    "title": "\u7384\u661fOps Admin",
-    "subtitle": "Connect to your \u7384\u661fOps instance",
+    "title": "\u7384\u661fRobot Admin",
+    "subtitle": "Connect to your \u7384\u661fRobot instance",
     "token": "API token",
     "serverUrl": "Server URL",
     "connect": "Connect",
@@ -232,8 +232,10 @@
     "appToken": "App Token",
     "accessToken": "Access Token",
     "allowFrom": "Allowed users",
+    "allowChat": "Allowed chats",
     "allowFromHintTelegram": "Telegram user IDs, comma-separated",
     "groupReplyAll": "Reply to all group messages",
+    "groupOnly": "Groups only",
     "sharedGroupSession": "Shared group session",
     "sharedChannelSession": "Shared channel session",
     "guildId": "Guild ID",

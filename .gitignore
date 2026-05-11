@@ -35,7 +35,7 @@ vendor/
 # Project-specific
 # ============================================================================
 # Runtime configuration (contains secrets)
-config.toml
+
 config.test.toml
 .env
 *.local.toml

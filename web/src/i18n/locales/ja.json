@@ -165,8 +165,8 @@
     "rawConfig": "生の設定"
   },
   "login": {
-    "title": "\u7384\u661fOps \u7ba1\u7406\u30b3\u30f3\u30bd\u30fc\u30eb",
-    "subtitle": "\u7384\u661fOps \u30a4\u30f3\u30b9\u30bf\u30f3\u30b9\u306b\u63a5\u7d9a",
+    "title": "\u7384\u661fRobot \u7ba1\u7406\u30b3\u30f3\u30bd\u30fc\u30eb",
+    "subtitle": "\u7384\u661fRobot \u30a4\u30f3\u30b9\u30bf\u30f3\u30b9\u306b\u63a5\u7d9a",
     "token": "API トークン",
     "serverUrl": "サーバー URL",
     "connect": "接続",
@@ -232,8 +232,10 @@
     "appToken": "アプリトークン",
     "accessToken": "アクセストークン",
     "allowFrom": "許可ユーザー",
+    "allowChat": "許可チャット",
     "allowFromHintTelegram": "Telegram ユーザー ID（カンマ区切り）",
     "groupReplyAll": "すべてのグループメッセージに返信",
+    "groupOnly": "グループのみ",
     "sharedGroupSession": "グループセッションを共有",
     "sharedChannelSession": "チャンネルセッションを共有",
     "guildId": "サーバー ID",
