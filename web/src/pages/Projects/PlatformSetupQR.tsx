@@ -15,6 +15,7 @@ type Phase = 'idle' | 'loading' | 'scanning' | 'scanned' | 'completed' | 'expire
 interface Props {
   platformType: PlatformKind;
   projectName: string;
+  platformName?: string;
   workDir?: string;
   agentType?: string;
   agentOptions?: Record<string, any>;
@@ -22,10 +23,11 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function PlatformSetupQR({ platformType, projectName, workDir, agentType, agentOptions, onComplete, onCancel }: Props) {
+export default function PlatformSetupQR({ platformType, projectName, platformName, workDir, agentType, agentOptions, onComplete, onCancel }: Props) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('idle');
   const [qrUrl, setQrUrl] = useState('');
+  const [displayName, setDisplayName] = useState(platformName || '');
   const [error, setError] = useState('');
   const cancelledRef = useRef(false);
   const pollingRef = useRef(false);
@@ -79,6 +81,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
               setPhase('saving');
               await setupFeishuSave({
                 project: projectName,
+                platform_name: displayName.trim(),
                 app_id: res.app_id!,
                 app_secret: res.app_secret!,
                 platform_type: res.platform || 'feishu',
@@ -149,6 +152,7 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
               setPhase('saving');
               await setupWeixinSave({
                 project: projectName,
+                platform_name: displayName.trim(),
                 token: pollRes.bot_token!,
                 base_url: pollRes.base_url,
                 ilink_bot_id: pollRes.ilink_bot_id,
@@ -200,6 +204,18 @@ export default function PlatformSetupQR({ platformType, projectName, workDir, ag
 
   return (
     <div className="flex flex-col items-center gap-4 py-4">
+      <div className="w-full max-w-xs">
+        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+          {t('setup.botDisplayName', 'Bot display name')}
+        </label>
+        <input
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder={t('setup.botDisplayNamePlaceholder', 'e.g. Ops Bot')}
+          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent/50 placeholder:text-gray-400"
+        />
+      </div>
+
       {phase === 'idle' && (
         <>
           <Smartphone size={48} className="text-gray-400" />

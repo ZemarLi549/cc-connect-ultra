@@ -2312,6 +2312,7 @@ func TestSaveProjectSettings_DynamicOptionsAndPlatformRemoval(t *testing.T) {
 	configPath := writeConfigFixture(t, feishuConfigFixture)
 	patchConfigPath(t, configPath)
 
+	name := "Alpha Bot"
 	err := SaveProjectSettings("alpha", ProjectSettingsUpdate{
 		AgentOptions: map[string]any{
 			"work_dir": "/tmp/new-alpha",
@@ -2321,6 +2322,7 @@ func TestSaveProjectSettings_DynamicOptionsAndPlatformRemoval(t *testing.T) {
 		PlatformOptionUpdates: []ProjectPlatformOptionUpdate{
 			{
 				Index: 0,
+				Name:  &name,
 				Options: map[string]any{
 					"token":      "tg_new",
 					"allow_from": "u42",
@@ -2350,6 +2352,9 @@ func TestSaveProjectSettings_DynamicOptionsAndPlatformRemoval(t *testing.T) {
 	if proj.Platforms[0].Type != "telegram" {
 		t.Fatalf("remaining platform = %q, want telegram", proj.Platforms[0].Type)
 	}
+	if proj.Platforms[0].Name != "Alpha Bot" {
+		t.Fatalf("remaining platform name = %q, want Alpha Bot", proj.Platforms[0].Name)
+	}
 	if stringMapValue(proj.Platforms[0].Options, "token") != "tg_new" {
 		t.Fatalf("telegram token = %q, want tg_new", stringMapValue(proj.Platforms[0].Options, "token"))
 	}
@@ -2369,6 +2374,9 @@ func TestGetProjectConfigDetails(t *testing.T) {
 	pcs, ok := details["platform_configs"].([]map[string]any)
 	if !ok || len(pcs) < 2 {
 		t.Fatalf("platform_configs = %#v", details["platform_configs"])
+	}
+	if pcs[0]["name"] != "" {
+		t.Fatalf("platform_configs[0].name = %#v, want empty string", pcs[0]["name"])
 	}
 }
 
@@ -2396,6 +2404,31 @@ func TestAddPlatformToProject_NewProjectWithAgentTypeAndWorkDir(t *testing.T) {
 	}
 	if len(proj.Platforms) != 1 || proj.Platforms[0].Type != "slack" {
 		t.Fatalf("platforms = %#v", proj.Platforms)
+	}
+}
+
+func TestSaveProjectSettings_PlatformNameOnlyPreservesOptions(t *testing.T) {
+	configPath := writeConfigFixture(t, feishuConfigFixture)
+	patchConfigPath(t, configPath)
+
+	name := "Ops Bot"
+	err := SaveProjectSettings("alpha", ProjectSettingsUpdate{
+		PlatformOptionUpdates: []ProjectPlatformOptionUpdate{{
+			Index: 0,
+			Name:  &name,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SaveProjectSettings: %v", err)
+	}
+
+	cfg := readConfigFixture(t, configPath)
+	proj := cfg.Projects[0]
+	if proj.Platforms[0].Name != "Ops Bot" {
+		t.Fatalf("platform name = %q, want Ops Bot", proj.Platforms[0].Name)
+	}
+	if stringMapValue(proj.Platforms[0].Options, "bot_token") != "token_xxx" {
+		t.Fatalf("telegram bot_token = %q, want token_xxx", stringMapValue(proj.Platforms[0].Options, "bot_token"))
 	}
 }
 

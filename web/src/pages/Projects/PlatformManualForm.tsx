@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 interface Props {
   platformType: string;
   projectName: string;
+  platformName?: string;
   workDir?: string;
   agentType?: string;
   agentOptions?: Record<string, any>;
@@ -16,10 +17,11 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function PlatformManualForm({ platformType, projectName, workDir, agentType, agentOptions, onComplete, onCancel }: Props) {
+export default function PlatformManualForm({ platformType, projectName, platformName, workDir, agentType, agentOptions, onComplete, onCancel }: Props) {
   const { t } = useTranslation();
   const meta = platformMeta[platformType];
   const [values, setValues] = useState<Record<string, any>>({});
+  const [displayName, setDisplayName] = useState(platformName || '');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -53,6 +55,7 @@ export default function PlatformManualForm({ platformType, projectName, workDir,
         }
       }
       await addPlatformToProject(projectName, {
+        name: displayName.trim(),
         type: platformType,
         options: opts,
         work_dir: workDir,
@@ -72,6 +75,18 @@ export default function PlatformManualForm({ platformType, projectName, workDir,
   return (
     <div className="space-y-4 py-2">
       <p className="text-sm font-medium text-gray-900 dark:text-white">{meta.label}</p>
+
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+          {t('setup.botDisplayName', 'Bot display name')}
+        </label>
+        <input
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder={t('setup.botDisplayNamePlaceholder', 'e.g. Ops Bot')}
+          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent/50 placeholder:text-gray-400"
+        />
+      </div>
 
       {basicFields.map(f => (
         <FieldInput key={f.key} field={f} value={values[f.key]} onChange={v => set(f.key, v)} t={t} />

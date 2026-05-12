@@ -414,6 +414,7 @@ type CodexProviderConfig struct {
 }
 
 type PlatformConfig struct {
+	Name    string         `toml:"name,omitempty"`
 	Type    string         `toml:"type"`
 	Options map[string]any `toml:"options"`
 }
@@ -2679,6 +2680,7 @@ type ProjectSettingsUpdate struct {
 
 type ProjectPlatformOptionUpdate struct {
 	Index   int
+	Name    *string
 	Options map[string]any
 }
 
@@ -2816,7 +2818,12 @@ func SaveProjectSettings(projectName string, update ProjectSettingsUpdate) error
 				if u.Index < 0 || u.Index >= len(proj.Platforms) {
 					return fmt.Errorf("invalid platform index %d", u.Index)
 				}
-				proj.Platforms[u.Index].Options = cloneAnyMap(u.Options)
+				if u.Name != nil {
+					proj.Platforms[u.Index].Name = strings.TrimSpace(*u.Name)
+				}
+				if u.Options != nil {
+					proj.Platforms[u.Index].Options = cloneAnyMap(u.Options)
+				}
 			}
 		}
 		if len(update.RemovePlatformIndexes) > 0 {
@@ -2886,6 +2893,7 @@ func GetProjectConfigDetails(projectName string) map[string]any {
 		for j, plat := range p.Platforms {
 			pc := map[string]any{
 				"index":   j,
+				"name":    plat.Name,
 				"type":    plat.Type,
 				"options": cloneAnyMap(plat.Options),
 			}

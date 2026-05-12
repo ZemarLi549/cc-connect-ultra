@@ -35,6 +35,7 @@ type ProjectSettingsUpdate struct {
 
 type ProjectPlatformOptionUpdate struct {
 	Index   int
+	Name    *string
 	Options map[string]any
 }
 
@@ -56,7 +57,7 @@ type ManagementServer struct {
 
 	setupFeishuSave        func(req FeishuSetupSaveRequest) error
 	setupWeixinSave        func(req WeixinSetupSaveRequest) error
-	addPlatformToProject   func(projectName, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error
+	addPlatformToProject   func(projectName, platName, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error
 	removeProject          func(projectName string) error
 	saveProjectSettings    func(projectName string, update ProjectSettingsUpdate) error
 	getProjectConfig       func(projectName string) map[string]any
@@ -107,7 +108,7 @@ func (m *ManagementServer) SetSetupWeixinSave(fn func(WeixinSetupSaveRequest) er
 	m.setupWeixinSave = fn
 }
 
-func (m *ManagementServer) SetAddPlatformToProject(fn func(string, string, map[string]any, string, string, map[string]any) error) {
+func (m *ManagementServer) SetAddPlatformToProject(fn func(string, string, string, map[string]any, string, string, map[string]any) error) {
 	m.addPlatformToProject = fn
 }
 
@@ -398,6 +399,42 @@ func mgmtJSON(w http.ResponseWriter, status int, data any) {
 	}
 }
 
+func configuredPlatformLabels(extra map[string]any) []string {
+	if extra == nil {
+		return nil
+	}
+	var out []string
+	appendLabel := func(pc map[string]any) {
+		typ, _ := pc["type"].(string)
+		typ = strings.TrimSpace(typ)
+		if typ == "" {
+			return
+		}
+		name, _ := pc["name"].(string)
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out = append(out, name)
+			return
+		}
+		out = append(out, typ)
+	}
+	switch pcs := extra["platform_configs"].(type) {
+	case []map[string]any:
+		for _, pc := range pcs {
+			appendLabel(pc)
+		}
+	case []any:
+		for _, item := range pcs {
+			pc, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			appendLabel(pc)
+		}
+	}
+	return out
+}
+
 func splitSessionKey(key string) []string {
 	return strings.SplitN(key, ":", 3)
 }
@@ -584,11 +621,20 @@ func (m *ManagementServer) handleProjects(w http.ResponseWriter, r *http.Request
 	m.mu.RLock()
 	projects := make([]map[string]any, 0, len(m.engines))
 	existing := make(map[string]struct{}, len(m.engines))
+	projectPlatformNames := map[string][]string{}
+	if m.getProjectConfig != nil {
+		for name := range m.engines {
+			projectPlatformNames[name] = configuredPlatformLabels(m.getProjectConfig(name))
+		}
+	}
 	for name, e := range m.engines {
 		existing[name] = struct{}{}
-		platNames := make([]string, len(e.platforms))
-		for i, p := range e.platforms {
-			platNames[i] = p.Name()
+		platNames := projectPlatformNames[name]
+		if len(platNames) != len(e.platforms) {
+			platNames = make([]string, len(e.platforms))
+			for i, p := range e.platforms {
+				platNames[i] = p.Name()
+			}
 		}
 
 		sessCount := len(e.sessions.AllSessions())
@@ -624,24 +670,7 @@ func (m *ManagementServer) handleProjects(w http.ResponseWriter, r *http.Request
 						if at, ok := extra["agent_type"].(string); ok && strings.TrimSpace(at) != "" {
 							agentType = strings.TrimSpace(at)
 						}
-						switch pcs := extra["platform_configs"].(type) {
-						case []map[string]any:
-							for _, pc := range pcs {
-								if typ, ok := pc["type"].(string); ok && strings.TrimSpace(typ) != "" {
-									platNames = append(platNames, strings.TrimSpace(typ))
-								}
-							}
-						case []any:
-							for _, item := range pcs {
-								pc, ok := item.(map[string]any)
-								if !ok {
-									continue
-								}
-								if typ, ok := pc["type"].(string); ok && strings.TrimSpace(typ) != "" {
-									platNames = append(platNames, strings.TrimSpace(typ))
-								}
-							}
-						}
+						platNames = configuredPlatformLabels(extra)
 					}
 				}
 				projects = append(projects, map[string]any{
@@ -821,6 +850,30 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 				for k, v := range extra {
 					data[k] = v
 				}
+				switch pcs := extra["platform_configs"].(type) {
+				case []map[string]any:
+					for i, pc := range pcs {
+						if i >= len(platInfos) {
+							break
+						}
+						if n, ok := pc["name"].(string); ok {
+							platInfos[i]["name"] = strings.TrimSpace(n)
+						}
+					}
+				case []any:
+					for i, item := range pcs {
+						if i >= len(platInfos) {
+							break
+						}
+						pc, ok := item.(map[string]any)
+						if !ok {
+							continue
+						}
+						if n, ok := pc["name"].(string); ok {
+							platInfos[i]["name"] = strings.TrimSpace(n)
+						}
+					}
+				}
 			}
 		}
 
@@ -843,6 +896,7 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 			AgentOptions          map[string]any    `json:"agent_options"`
 			PlatformOptionUpdates []struct {
 				Index   int            `json:"index"`
+				Name    *string        `json:"name"`
 				Options map[string]any `json:"options"`
 			} `json:"platform_option_updates"`
 			RemovePlatformIndexes []int `json:"remove_platform_indexes"`
@@ -917,6 +971,7 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 			for _, u := range body.PlatformOptionUpdates {
 				platUpdates = append(platUpdates, ProjectPlatformOptionUpdate{
 					Index:   u.Index,
+					Name:    u.Name,
 					Options: u.Options,
 				})
 			}

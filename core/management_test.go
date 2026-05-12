@@ -907,15 +907,17 @@ func TestResolveGlobalProviderForAgent(t *testing.T) {
 func TestMgmt_AddPlatformToNewProject_DoesNotRequireEngine(t *testing.T) {
 	mgmt, ts, _ := testManagementServer(t, "tok")
 
-	var savedProject, savedPlatType string
-	mgmt.SetAddPlatformToProject(func(proj, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error {
+	var savedProject, savedPlatName, savedPlatType string
+	mgmt.SetAddPlatformToProject(func(proj, platName, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error {
 		savedProject = proj
+		savedPlatName = platName
 		savedPlatType = platType
 		return nil
 	})
 
 	// "brand-new-project" has no engine registered — this must NOT return 404.
 	r := mgmtPost(t, ts.URL+"/api/v1/projects/brand-new-project/add-platform", "tok", map[string]any{
+		"name":    "Ops Bot",
 		"type":    "dingtalk",
 		"options": map[string]any{"client_id": "abc", "client_secret": "def"},
 	})
@@ -924,6 +926,9 @@ func TestMgmt_AddPlatformToNewProject_DoesNotRequireEngine(t *testing.T) {
 	}
 	if savedProject != "brand-new-project" {
 		t.Fatalf("saved project = %q, want brand-new-project", savedProject)
+	}
+	if savedPlatName != "Ops Bot" {
+		t.Fatalf("saved platform name = %q, want Ops Bot", savedPlatName)
 	}
 	if savedPlatType != "dingtalk" {
 		t.Fatalf("saved platform type = %q, want dingtalk", savedPlatType)

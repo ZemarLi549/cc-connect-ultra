@@ -584,6 +584,7 @@ level = "info" # debug, info, warn, error
 # api_key = "app-xxxxxxxxxxxxxxxx"
 # app_mode = "advanced-chat"  # "advanced-chat" | "chat" | "completion" | "workflow"
 # user = "cc-connect:my-dify"
+# user_from_session_user_id = true  # Optional: send only platform user_id/open_id to Dify user for per-user isolation
 # query_input_key = "query"   # Used for completion/workflow apps
 #
 # IMPORTANT: inputs must be a dictionary/map (never null).

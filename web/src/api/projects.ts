@@ -10,6 +10,7 @@ export interface ProjectSummary {
 
 export interface PlatformConfigInfo {
   index?: number;
+  name?: string;
   type: string;
   allow_from?: string;
   options?: Record<string, any>;
@@ -26,7 +27,7 @@ export interface ProjectDetail {
   provider_refs?: string[];
   agent_options?: Record<string, any>;
   platform_configs?: PlatformConfigInfo[];
-  platforms: { type: string; connected: boolean }[];
+  platforms: { type: string; name?: string; connected: boolean }[];
   sessions_count: number;
   active_session_keys: string[];
   heartbeat: {
@@ -54,7 +55,7 @@ export interface ProjectSettingsUpdate {
   inject_sender?: boolean;
   platform_allow_from?: Record<string, string>;
   agent_options?: Record<string, any>;
-  platform_option_updates?: Array<{ index: number; options: Record<string, any> }>;
+  platform_option_updates?: Array<{ index: number; name?: string; options: Record<string, any> }>;
   remove_platform_indexes?: number[];
 }
 
@@ -65,7 +66,7 @@ export const getProject = (name: string) => api.get<ProjectDetail>(`/projects/${
 export const updateProject = (name: string, body: ProjectSettingsUpdate) => api.patch(`/projects/${name}`, body);
 
 export const addPlatformToProject = (projectName: string, body: {
-  type: string; options: Record<string, any>; work_dir?: string; agent_type?: string; agent_options?: Record<string, any>;
+  name?: string; type: string; options: Record<string, any>; work_dir?: string; agent_type?: string; agent_options?: Record<string, any>;
 }) => api.post<{ message: string; restart_required: boolean }>(`/projects/${projectName}/add-platform`, body);
 
 export const deleteProject = (name: string) =>

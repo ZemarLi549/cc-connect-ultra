@@ -43,6 +43,7 @@ type OptionRow = {
 };
 type PlatformOptionEditor = {
   index: number;
+  name: string;
   type: string;
   rows: OptionRow[];
 };
@@ -367,6 +368,7 @@ export default function ProjectDetail() {
         setDifyInputs(buildDifyInputRows(normalizedAgentRows));
         setPlatformOptionEditors((proj.value.platform_configs || []).map(pc => ({
           index: pc.index ?? 0,
+          name: pc.name || '',
           type: pc.type,
           rows: mergeTemplateRows(pc.type, optionMapToRows(pc.options || {})),
         })));
@@ -459,6 +461,7 @@ export default function ProjectDetail() {
         const key = platformControlKey(pc.type, index);
         const editor = editorByIndex.get(index);
         const options = editor ? rowsToOptionMap(editor.rows) : { ...(pc.options || {}) };
+        const platformName = editor ? editor.name.trim() : (pc.name || '').trim();
         const allowFrom = platformAllowFrom[key];
         if (allowFrom !== undefined) options.allow_from = allowFrom.trim();
         const allowChat = platformAllowChat[key];
@@ -470,9 +473,9 @@ export default function ProjectDetail() {
             options.allow_chat = trimmed;
           }
         }
-        return { index, options, original: pc.options || {} };
-      }).filter((u) => !jsonEqual(u.options, u.original))
-        .map(({ index, options }) => ({ index, options }));
+        return { index, name: platformName, options, originalName: (pc.name || '').trim(), original: pc.options || {} };
+      }).filter((u) => !jsonEqual(u.options, u.original) || u.name !== u.originalName)
+        .map(({ index, name: platformName, options }) => ({ index, name: platformName, options }));
 
       const payload: any = {
         language,
@@ -528,6 +531,9 @@ export default function ProjectDetail() {
   const addPlatformOptionRow = (index: number) => {
     setPlatformOptionEditors(prev => prev.map(p => (p.index === index ? { ...p, rows: [...p.rows, newOptionRow()] } : p)));
   };
+  const updatePlatformEditor = (index: number, patch: Partial<PlatformOptionEditor>) => {
+    setPlatformOptionEditors(prev => prev.map(p => (p.index === index ? { ...p, ...patch } : p)));
+  };
   const updatePlatformOptionRow = (index: number, id: string, patch: Partial<OptionRow>) => {
     setPlatformOptionEditors(prev => prev.map(p => (
       p.index === index ? { ...p, rows: p.rows.map(r => (r.id === id ? { ...r, ...patch } : r)) } : p
@@ -554,6 +560,7 @@ export default function ProjectDetail() {
         .filter(pc => !removedPlatformIndexes.includes(pc.index ?? -1))
         .map(pc => ({
           index: pc.index ?? 0,
+          name: pc.name || '',
           type: pc.type,
           rows: mergeTemplateRows(pc.type, optionMapToRows(pc.options || {})),
         }))
@@ -655,11 +662,21 @@ export default function ProjectDetail() {
               </Button>
             </div>
             <div className="flex flex-wrap gap-2">
-              {project.platforms?.map((p) => (
-                <Badge key={p.type} variant={p.connected ? 'success' : 'danger'}>
-                  <Plug size={12} className="mr-1" /> {p.type} {p.connected ? '✓' : '✗'}
-                </Badge>
-              ))}
+              {(project.platform_configs && project.platform_configs.length > 0
+                ? project.platform_configs.map((pc, idx) => {
+                    const connected = project.platforms?.[idx]?.connected ?? true;
+                    const label = (pc.name || '').trim() ? `${pc.name!.trim()} · ${pc.type}` : pc.type;
+                    return (
+                      <Badge key={`${pc.type}-${idx}`} variant={connected ? 'success' : 'danger'}>
+                        <Plug size={12} className="mr-1" /> {label} {connected ? '✓' : '✗'}
+                      </Badge>
+                    );
+                  })
+                : project.platforms?.map((p, idx) => (
+                    <Badge key={`${p.type}-${idx}`} variant={p.connected ? 'success' : 'danger'}>
+                      <Plug size={12} className="mr-1" /> {(p.name || '').trim() ? `${p.name!.trim()} · ${p.type}` : p.type} {p.connected ? '✓' : '✗'}
+                    </Badge>
+                  )))}
             </div>
           </Card>
           <Card>
@@ -1112,10 +1129,11 @@ export default function ProjectDetail() {
             ) : platformOptionEditors.map(p => {
               const rows = sortRowsByTemplate(p.type, p.rows);
               const hasTemplate = !!platformMeta[p.type];
+              const platformLabel = p.name.trim() ? `${p.name.trim()} · ${p.type}` : `${p.type} #${p.index}`;
               return (
               <div key={`${p.type}-${p.index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{p.type} #{p.index}</p>
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{platformLabel}</p>
                   <div className="flex items-center gap-2">
                     {hasTemplate && (
                       <Button size="sm" variant="secondary" onClick={() => applyPlatformTemplate(p.index, p.type)}>
@@ -1129,6 +1147,17 @@ export default function ProjectDetail() {
                       <Trash2 size={13} /> {t('common.delete')}
                     </Button>
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                    {t('projects.platformDisplayName', 'Bot display name')}
+                  </label>
+                  <input
+                    value={p.name}
+                    onChange={(e) => updatePlatformEditor(p.index, { name: e.target.value })}
+                    placeholder={t('projects.platformDisplayNamePlaceholder', 'e.g. Ops Bot')}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
                 </div>
                 {rows.length === 0 ? (
                   <p className="text-xs text-gray-400">{t('projects.noPlatformOptionEntries', 'No options. Click Add.')}</p>
@@ -1191,9 +1220,10 @@ export default function ProjectDetail() {
                   const key = platformControlKey(pc.type, idx);
                   const typ = (pc.type || '').toLowerCase();
                   const canSetChat = typ === 'feishu' || typ === 'lark';
+                  const platformLabel = (pc.name || '').trim() ? `${pc.name!.trim()} · ${pc.type}` : `${pc.type} #${idx}`;
                   return (
                     <div key={`${pc.type}-${idx}`} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{pc.type} #{idx}</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{platformLabel}</p>
                       <Input
                         label={t('fields.allowFrom')}
                         value={platformAllowFrom[key] ?? pc.allow_from ?? ''}

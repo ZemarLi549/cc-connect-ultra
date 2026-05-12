@@ -24,23 +24,24 @@ func init() {
 const defaultConversationLimit = 100
 
 type Agent struct {
-	project            string
-	workDir            string
-	baseURL            string
-	apiKey             string
-	appMode            string
-	user               string
-	queryInputKey      string
-	workflowID         string
-	autoGenerateName   bool
-	timeout            time.Duration
-	inputs             map[string]any
-	providers          []core.ProviderConfig
-	activeIdx          int
-	sessionEnv         []string
-	userFromSessionKey bool
-	client             *http.Client
-	mu                 sync.RWMutex
+	project               string
+	workDir               string
+	baseURL               string
+	apiKey                string
+	appMode               string
+	user                  string
+	queryInputKey         string
+	workflowID            string
+	autoGenerateName      bool
+	timeout               time.Duration
+	inputs                map[string]any
+	providers             []core.ProviderConfig
+	activeIdx             int
+	sessionEnv            []string
+	userFromSessionKey    bool
+	userFromSessionUserID bool
+	client                *http.Client
+	mu                    sync.RWMutex
 }
 
 func New(opts map[string]any) (core.Agent, error) {
@@ -67,20 +68,21 @@ func New(opts map[string]any) (core.Agent, error) {
 	timeout := durationOpt(opts["timeout_secs"], 110*time.Second)
 
 	return &Agent{
-		project:            strings.TrimSpace(project),
-		workDir:            workDir,
-		baseURL:            normalizeBaseURL(baseURL),
-		apiKey:             strings.TrimSpace(apiKey),
-		appMode:            normalizeAppMode(appMode),
-		user:               user,
-		queryInputKey:      strings.TrimSpace(queryInputKey),
-		workflowID:         strings.TrimSpace(workflowID),
-		autoGenerateName:   boolOpt(opts["auto_generate_name"], true),
-		timeout:            timeout,
-		inputs:             cloneAnyMap(anyMapOpt(opts["inputs"])),
-		activeIdx:          -1,
-		userFromSessionKey: boolOpt(opts["user_from_session_key"], false),
-		client:             &http.Client{Timeout: timeout},
+		project:               strings.TrimSpace(project),
+		workDir:               workDir,
+		baseURL:               normalizeBaseURL(baseURL),
+		apiKey:                strings.TrimSpace(apiKey),
+		appMode:               normalizeAppMode(appMode),
+		user:                  user,
+		queryInputKey:         strings.TrimSpace(queryInputKey),
+		workflowID:            strings.TrimSpace(workflowID),
+		autoGenerateName:      boolOpt(opts["auto_generate_name"], true),
+		timeout:               timeout,
+		inputs:                cloneAnyMap(anyMapOpt(opts["inputs"])),
+		activeIdx:             -1,
+		userFromSessionKey:    boolOpt(opts["user_from_session_key"], false),
+		userFromSessionUserID: boolOpt(opts["user_from_session_user_id"], false),
+		client:                &http.Client{Timeout: timeout},
 	}, nil
 }
 
@@ -173,9 +175,10 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	sessionEnv := append([]string(nil), a.sessionEnv...)
 	useSessionUser := a.userFromSessionKey
+	useSessionUserID := a.userFromSessionUserID
 	a.mu.RUnlock()
 
-	cfg.user = resolveRuntimeUser(cfg.user, sessionEnv, useSessionUser)
+	cfg.user = resolveRuntimeUser(cfg.user, sessionEnv, useSessionUser, useSessionUserID)
 	return newSession(ctx, cfg, sessionID)
 }
 
@@ -281,8 +284,8 @@ func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit i
 func (a *Agent) runtimeConfigForReadOnly() (runtimeConfig, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	if a.userFromSessionKey {
-		return runtimeConfig{}, fmt.Errorf("dify: list/history/delete are unavailable when user_from_session_key = true")
+	if a.userFromSessionKey || a.userFromSessionUserID {
+		return runtimeConfig{}, fmt.Errorf("dify: list/history/delete are unavailable when user is derived from session context")
 	}
 	cfg := runtimeConfig{
 		project:          a.project,
@@ -535,17 +538,57 @@ func buildURL(baseURL, path string, query map[string]string) (string, error) {
 	return u.String(), nil
 }
 
-func resolveRuntimeUser(base string, env []string, fromSession bool) string {
-	if !fromSession {
-		return base
-	}
-	for _, item := range env {
-		k, v, ok := strings.Cut(item, "=")
-		if ok && k == "CC_SESSION_KEY" && strings.TrimSpace(v) != "" {
-			return base + ":" + v
+func resolveRuntimeUser(base string, env []string, fromSessionKey bool, fromSessionUserID bool) string {
+	if fromSessionUserID {
+		if userID := platformUserIDFromEnv(env); userID != "" {
+			return userID
+		}
+		if userID := sessionUserIDFromKey(sessionKeyFromEnv(env)); userID != "" {
+			return userID
 		}
 	}
+	sessionKey := sessionKeyFromEnv(env)
+	if fromSessionKey && sessionKey != "" {
+		return base + ":" + sessionKey
+	}
 	return base
+}
+
+func sessionKeyFromEnv(env []string) string {
+	for _, item := range env {
+		k, v, ok := strings.Cut(item, "=")
+		if ok && k == "CC_SESSION_KEY" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func platformUserIDFromEnv(env []string) string {
+	for _, item := range env {
+		k, v, ok := strings.Cut(item, "=")
+		if ok && k == "CC_PLATFORM_USER_ID" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func sessionUserIDFromKey(sessionKey string) string {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return ""
+	}
+	parts := strings.Split(sessionKey, ":")
+	if len(parts) < 3 {
+		return ""
+	}
+	last := strings.TrimSpace(parts[len(parts)-1])
+	prev := strings.TrimSpace(parts[len(parts)-2])
+	if last == "" || prev == "root" || last == "relay" {
+		return ""
+	}
+	return last
 }
 
 func isConversationMode(mode string) bool {

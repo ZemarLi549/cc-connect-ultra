@@ -22,6 +22,7 @@ const (
 
 type FeishuSetupSaveRequest struct {
 	ProjectName  string         `json:"project"`
+	PlatformName string         `json:"platform_name"`
 	AppID        string         `json:"app_id"`
 	AppSecret    string         `json:"app_secret"`
 	PlatformType string         `json:"platform_type"`
@@ -33,6 +34,7 @@ type FeishuSetupSaveRequest struct {
 
 type WeixinSetupSaveRequest struct {
 	ProjectName  string         `json:"project"`
+	PlatformName string         `json:"platform_name"`
 	Token        string         `json:"token"`
 	BaseURL      string         `json:"base_url"`
 	IlinkBotID   string         `json:"ilink_bot_id"`
@@ -449,6 +451,7 @@ func (m *ManagementServer) handleSetupWeixinSave(w http.ResponseWriter, r *http.
 // ── Generic platform add (manual config) ─────────────────────
 
 type AddPlatformRequest struct {
+	Name         string         `json:"name"`
 	Type         string         `json:"type"`
 	Options      map[string]any `json:"options"`
 	WorkDir      string         `json:"work_dir"`
@@ -474,7 +477,7 @@ func (m *ManagementServer) handleProjectAddPlatform(w http.ResponseWriter, r *ht
 		mgmtError(w, http.StatusServiceUnavailable, "config persistence not available")
 		return
 	}
-	if err := m.addPlatformToProject(projectName, req.Type, req.Options, req.WorkDir, req.AgentType, req.AgentOptions); err != nil {
+	if err := m.addPlatformToProject(projectName, req.Name, req.Type, req.Options, req.WorkDir, req.AgentType, req.AgentOptions); err != nil {
 		mgmtError(w, http.StatusInternalServerError, "save config: "+err.Error())
 		return
 	}

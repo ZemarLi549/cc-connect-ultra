@@ -216,9 +216,86 @@ func TestListSessionsReturnsConversationSummaries(t *testing.T) {
 }
 
 func TestResolveRuntimeUserFromSessionKey(t *testing.T) {
-	got := resolveRuntimeUser("cc-connect:demo", []string{"CC_SESSION_KEY=telegram:1:2"}, true)
+	got := resolveRuntimeUser("cc-connect:demo", []string{"CC_SESSION_KEY=telegram:1:2"}, true, false)
 	if got != "cc-connect:demo:telegram:1:2" {
 		t.Fatalf("resolveRuntimeUser() = %q", got)
+	}
+}
+
+func TestResolveRuntimeUserFromSessionUserID(t *testing.T) {
+	got := resolveRuntimeUser("cc-connect:demo", []string{"CC_PLATFORM_USER_ID=u_test_user"}, false, true)
+	if got != "u_test_user" {
+		t.Fatalf("resolveRuntimeUser() = %q", got)
+	}
+}
+
+func TestResolveRuntimeUserFromSessionUserIDFallsBackToSessionKey(t *testing.T) {
+	got := resolveRuntimeUser("cc-connect:demo", []string{"CC_SESSION_KEY=feishu:oc_test:ou_user_1"}, false, true)
+	if got != "ou_user_1" {
+		t.Fatalf("resolveRuntimeUser() = %q", got)
+	}
+}
+
+func TestResolveRuntimeUserFromSessionUserIDIgnoresThreadKeys(t *testing.T) {
+	got := resolveRuntimeUser("cc-connect:demo", []string{"CC_SESSION_KEY=feishu:oc_test:root:om_root"}, false, true)
+	if got != "cc-connect:demo" {
+		t.Fatalf("resolveRuntimeUser() = %q", got)
+	}
+}
+
+func TestAgentStartSessionUsesSessionUserIDForDifyUser(t *testing.T) {
+	var requestBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/info":
+			_ = json.NewEncoder(w).Encode(map[string]any{"mode": "advanced-chat"})
+		case r.Method == http.MethodPost && r.URL.Path == "/chat-messages":
+			if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"answer":          "hello",
+				"conversation_id": "conv-123",
+				"metadata": map[string]any{
+					"usage": map[string]any{
+						"prompt_tokens":     3,
+						"completion_tokens": 2,
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	a, err := New(map[string]any{
+		"base_url":                  srv.URL,
+		"api_key":                   "app-key",
+		"user":                      "cc-connect:demo",
+		"user_from_session_user_id": true,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	agent := a.(*Agent)
+	agent.client = srv.Client()
+	agent.SetSessionEnv([]string{"CC_SESSION_KEY=feishu:oc_test:ou_user_1", "CC_PLATFORM_USER_ID=u_test_user"})
+
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer sess.Close()
+
+	if err := sess.Send("hello", nil, nil); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	waitForEventResult(t, sess.Events())
+
+	if got, _ := requestBody["user"].(string); got != "u_test_user" {
+		t.Fatalf("request user = %q, want u_test_user", got)
 	}
 }
 

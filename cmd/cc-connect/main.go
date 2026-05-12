@@ -825,7 +825,7 @@ func main() {
 			if platType == "" {
 				platType = "feishu"
 			}
-			_, err := config.EnsureProjectWithFeishuPlatform(config.EnsureProjectWithFeishuOptions{
+			ensureResult, err := config.EnsureProjectWithFeishuPlatform(config.EnsureProjectWithFeishuOptions{
 				ProjectName:  req.ProjectName,
 				PlatformType: platType,
 				WorkDir:      req.WorkDir,
@@ -845,10 +845,21 @@ func main() {
 			if err != nil {
 				return err
 			}
+			if strings.TrimSpace(req.PlatformName) != "" && ensureResult != nil && ensureResult.PlatformAbsIndex >= 0 {
+				name := strings.TrimSpace(req.PlatformName)
+				if err := config.SaveProjectSettings(req.ProjectName, config.ProjectSettingsUpdate{
+					PlatformOptionUpdates: []config.ProjectPlatformOptionUpdate{{
+						Index: ensureResult.PlatformAbsIndex,
+						Name:  &name,
+					}},
+				}); err != nil {
+					return fmt.Errorf("save platform name: %w", err)
+				}
+			}
 			return saveSetupAgentOptions(req.ProjectName, req.WorkDir, req.AgentOptions)
 		})
 		mgmtSrv.SetSetupWeixinSave(func(req core.WeixinSetupSaveRequest) error {
-			_, err := config.EnsureProjectWithWeixinPlatform(config.EnsureProjectWithWeixinOptions{
+			ensureResult, err := config.EnsureProjectWithWeixinPlatform(config.EnsureProjectWithWeixinOptions{
 				ProjectName: req.ProjectName,
 				WorkDir:     req.WorkDir,
 				AgentType:   req.AgentType,
@@ -867,13 +878,28 @@ func main() {
 			if err != nil {
 				return err
 			}
+			if strings.TrimSpace(req.PlatformName) != "" && ensureResult != nil && ensureResult.PlatformAbsIndex >= 0 {
+				name := strings.TrimSpace(req.PlatformName)
+				if err := config.SaveProjectSettings(req.ProjectName, config.ProjectSettingsUpdate{
+					PlatformOptionUpdates: []config.ProjectPlatformOptionUpdate{{
+						Index: ensureResult.PlatformAbsIndex,
+						Name:  &name,
+					}},
+				}); err != nil {
+					return fmt.Errorf("save platform name: %w", err)
+				}
+			}
 			return saveSetupAgentOptions(req.ProjectName, req.WorkDir, req.AgentOptions)
 		})
-		mgmtSrv.SetAddPlatformToProject(func(projectName, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error {
+		mgmtSrv.SetAddPlatformToProject(func(projectName, platName, platType string, opts map[string]any, workDir, agentType string, agentOptions map[string]any) error {
 			if opts == nil {
 				opts = map[string]any{}
 			}
-			return config.AddPlatformToProject(projectName, config.PlatformConfig{Type: platType, Options: opts}, workDir, agentType, agentOptions)
+			return config.AddPlatformToProject(projectName, config.PlatformConfig{
+				Name:    strings.TrimSpace(platName),
+				Type:    platType,
+				Options: opts,
+			}, workDir, agentType, agentOptions)
 		})
 		mgmtSrv.SetRemoveProject(config.RemoveProject)
 		mgmtSrv.SetSaveProjectSettings(func(name string, u core.ProjectSettingsUpdate) error {
