@@ -155,7 +155,7 @@ enable_feishu_card = false
 参考安装指南：`docs/通用agent安装.md`
 
 ## 二进制启动部署
-config.toml 中token = "xuan666"  初始登录token默认为xuan666, release 下载二进制包，config.toml放同一目录启动即可
+config.toml 中token = "xuan666"  初始登录token默认为xuan666, release 下载二进制包，config.toml放同一目录启动即可  访问http://localhost:9820
 
 ## 文档导航
 
