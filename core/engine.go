@@ -2212,7 +2212,11 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	if agent != e.agent {
 		agentOverride = agent
 	}
-	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey, msg.UserID)
+	platformUserID := strings.TrimSpace(msg.AgentUserID)
+	if platformUserID == "" {
+		platformUserID = msg.UserID
+	}
+	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey, platformUserID)
 
 	// Set workspaceDir on the state for idle reaper identification
 	if workspaceDir != "" {

@@ -51,7 +51,8 @@ func New(opts map[string]any) (core.Agent, error) {
 	}
 	project, _ := opts["cc_project"].(string)
 	user, _ := opts["user"].(string)
-	if user == "" {
+	userFromSessionUserID := boolOpt(opts["user_from_session_user_id"], true)
+	if user == "" && !userFromSessionUserID {
 		if project != "" {
 			user = "cc-connect:" + project
 		} else {
@@ -81,7 +82,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		inputs:                cloneAnyMap(anyMapOpt(opts["inputs"])),
 		activeIdx:             -1,
 		userFromSessionKey:    boolOpt(opts["user_from_session_key"], false),
-		userFromSessionUserID: boolOpt(opts["user_from_session_user_id"], false),
+		userFromSessionUserID: userFromSessionUserID,
 		client:                &http.Client{Timeout: timeout},
 	}, nil
 }
@@ -550,6 +551,9 @@ func resolveRuntimeUser(base string, env []string, fromSessionKey bool, fromSess
 	sessionKey := sessionKeyFromEnv(env)
 	if fromSessionKey && sessionKey != "" {
 		return base + ":" + sessionKey
+	}
+	if strings.TrimSpace(base) == "" {
+		return "cc-connect"
 	}
 	return base
 }

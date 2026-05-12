@@ -907,6 +907,7 @@ func main() {
 			for _, pu := range u.PlatformOptionUpdates {
 				platUpdates = append(platUpdates, config.ProjectPlatformOptionUpdate{
 					Index:   pu.Index,
+					Name:    pu.Name,
 					Options: pu.Options,
 				})
 			}

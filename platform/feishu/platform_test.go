@@ -171,11 +171,79 @@ func TestInteractivePlatform_OnMessagePassesCardSenderToHandler(t *testing.T) {
 	if receivedMsg == nil {
 		t.Fatal("expected handler to receive a message")
 	}
+	if receivedMsg.AgentUserID != openID {
+		t.Fatalf("message agent user id = %q, want fallback open_id %q", receivedMsg.AgentUserID, openID)
+	}
 	if receivedMsg.Content != "/help" {
 		t.Fatalf("message content = %q, want /help", receivedMsg.Content)
 	}
 	if _, ok := receivedPlat.(core.CardSender); !ok {
 		t.Fatalf("handler platform type = %T, want core.CardSender", receivedPlat)
+	}
+}
+
+func TestInteractivePlatform_OnMessageResolvesFeishuUserIDForAgent(t *testing.T) {
+	platformAny, err := New(map[string]any{"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ip, ok := platformAny.(*interactivePlatform)
+	if !ok {
+		t.Fatalf("platform type = %T, want *interactivePlatform", platformAny)
+	}
+
+	openID := "ou_test_user"
+	userID := "u_test_user"
+	chatID := "oc_test_chat"
+	messageID := "om_test_message"
+	msgType := "text"
+	chatType := "p2p"
+	senderType := "user"
+	content := `{"text":"hello"}`
+	createText := strconv.FormatInt(time.Now().UnixMilli(), 10)
+
+	ip.userIDCache.Store(openID, userID)
+
+	var (
+		wg          sync.WaitGroup
+		receivedMsg *core.Message
+	)
+	wg.Add(1)
+	ip.handler = func(_ core.Platform, msg *core.Message) {
+		defer wg.Done()
+		receivedMsg = msg
+	}
+
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Sender: &larkim.EventSender{
+				SenderId:   &larkim.UserId{OpenId: &openID},
+				SenderType: &senderType,
+			},
+			Message: &larkim.EventMessage{
+				MessageId:   &messageID,
+				ChatId:      &chatID,
+				ChatType:    &chatType,
+				MessageType: &msgType,
+				Content:     &content,
+				CreateTime:  &createText,
+			},
+		},
+	}
+
+	if err := ip.onMessage(context.Background(), event); err != nil {
+		t.Fatalf("onMessage() error = %v", err)
+	}
+	wg.Wait()
+
+	if receivedMsg == nil {
+		t.Fatal("expected handler to receive a message")
+	}
+	if receivedMsg.UserID != openID {
+		t.Fatalf("message user id = %q, want open_id %q", receivedMsg.UserID, openID)
+	}
+	if receivedMsg.AgentUserID != userID {
+		t.Fatalf("message agent user id = %q, want user_id %q", receivedMsg.AgentUserID, userID)
 	}
 }
 
@@ -1026,8 +1094,8 @@ func TestAllowChat_FiltersGroupMessages(t *testing.T) {
 			p, err := newPlatform("feishu", lark.FeishuBaseUrl, map[string]any{
 				"app_id": "cli_xxx", "app_secret": "secret",
 				"enable_feishu_card": true,
-				"group_reply_all":   true,
-				"allow_chat":        tt.allowChat,
+				"group_reply_all":    true,
+				"allow_chat":         tt.allowChat,
 			})
 			if err != nil {
 				t.Fatalf("newPlatform() error = %v", err)

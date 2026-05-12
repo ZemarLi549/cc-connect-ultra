@@ -583,8 +583,8 @@ level = "info" # debug, info, warn, error
 # base_url = "https://api.dify.ai/v1"
 # api_key = "app-xxxxxxxxxxxxxxxx"
 # app_mode = "advanced-chat"  # "advanced-chat" | "chat" | "completion" | "workflow"
-# user = "cc-connect:my-dify"
-# user_from_session_user_id = true  # Optional: send only platform user_id/open_id to Dify user for per-user isolation
+# user = "cc-connect:my-dify"       # Optional fallback only; if omitted, cc-connect prefers per-message platform user_id
+# user_from_session_user_id = true  # Optional; defaults to true and sends platform user_id/open_id to Dify user
 # query_input_key = "query"   # Used for completion/workflow apps
 #
 # IMPORTANT: inputs must be a dictionary/map (never null).

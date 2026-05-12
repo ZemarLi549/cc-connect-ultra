@@ -2352,6 +2352,42 @@ func TestHandleMessage_MultiWorkspacePreservesCCSessionKey(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_PrefersAgentUserIDForSessionEnv(t *testing.T) {
+	p := &stubPlatformEngine{n: "feishu"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	wsAgent := &sessionEnvRecordingAgent{session: newResultAgentSession("ok")}
+	e.agent = wsAgent
+
+	msg := &Message{
+		SessionKey:  "feishu:oc_test:ou_test_user",
+		Platform:    "feishu",
+		UserID:      "ou_test_user",
+		AgentUserID: "u_test_user",
+		UserName:    "user",
+		Content:     "hello",
+		ReplyCtx:    "ctx",
+	}
+	e.handleMessage(p, msg)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if got := wsAgent.EnvValue("CC_PLATFORM_USER_ID"); got != "" {
+			if got != msg.AgentUserID {
+				t.Fatalf("CC_PLATFORM_USER_ID = %q, want %q", got, msg.AgentUserID)
+			}
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for CC_PLATFORM_USER_ID to be injected")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 func TestHandleMessage_AutoResetOnIdle_RotatesToNewSession(t *testing.T) {
 	p := &stubPlatformEngine{n: "test"}
 	agentSession := newResultAgentSession("fresh reply")

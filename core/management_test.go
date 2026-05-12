@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -335,6 +336,7 @@ func TestMgmt_ProjectPatch_DynamicOptionsPersistAndRequireRestart(t *testing.T) 
 		"platform_option_updates": []map[string]any{
 			{
 				"index": 0,
+				"name":  "Ops Bot",
 				"options": map[string]any{
 					"app_id":      "cli_xxx",
 					"allow_from":  "*",
@@ -361,8 +363,36 @@ func TestMgmt_ProjectPatch_DynamicOptionsPersistAndRequireRestart(t *testing.T) 
 	if len(got.PlatformOptionUpdates) != 1 || got.PlatformOptionUpdates[0].Index != 0 {
 		t.Fatalf("platform_option_updates = %#v", got.PlatformOptionUpdates)
 	}
+	if got.PlatformOptionUpdates[0].Name == nil || *got.PlatformOptionUpdates[0].Name != "Ops Bot" {
+		t.Fatalf("platform_option_updates[0].name = %#v, want Ops Bot", got.PlatformOptionUpdates[0].Name)
+	}
 	if len(got.RemovePlatformIndexes) != 1 || got.RemovePlatformIndexes[0] != 2 {
 		t.Fatalf("remove_platform_indexes = %#v, want [2]", got.RemovePlatformIndexes)
+	}
+}
+
+func TestMgmt_ProjectPatch_SaveFailureReturnsError(t *testing.T) {
+	mgmt, ts, _ := testManagementServer(t, "tok")
+	mgmt.SetSaveProjectSettings(func(_ string, _ ProjectSettingsUpdate) error {
+		return fmt.Errorf("disk full")
+	})
+
+	r := mgmtPatch(t, ts.URL+"/api/v1/projects/test-project", "tok", map[string]any{
+		"platform_option_updates": []map[string]any{
+			{
+				"index": 0,
+				"name":  "Ops Bot",
+				"options": map[string]any{
+					"app_id": "cli_xxx",
+				},
+			},
+		},
+	})
+	if r.OK {
+		t.Fatal("expected patch to fail when saveProjectSettings returns error")
+	}
+	if !strings.Contains(r.Error, "persist project settings: disk full") {
+		t.Fatalf("error = %q, want persist project settings: disk full", r.Error)
 	}
 }
 

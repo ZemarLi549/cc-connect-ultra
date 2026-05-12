@@ -141,6 +141,7 @@ type Platform struct {
 	dedup            core.MessageDedup
 	botOpenID        string
 	userNameCache    sync.Map // open_id -> display name
+	userIDCache      sync.Map // open_id -> user_id
 	chatNameCache    sync.Map // chat_id -> chat name
 	chatMemberCache  sync.Map // chatID -> *chatMemberEntry
 	// Webhook mode fields (for Lark international version)
@@ -377,7 +378,7 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		})
 
 	if p.useInteractiveCard {
-		slog.Info(p.platformName+": interactive card mode enabled, ensure card.action.trigger event is subscribed in Feishu console")
+		slog.Info(p.platformName + ": interactive card mode enabled, ensure card.action.trigger event is subscribed in Feishu console")
 	}
 
 	if p.shouldUseWebhookMode() {
@@ -742,6 +743,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	if sender.SenderId != nil && sender.SenderId.OpenId != nil {
 		userID = *sender.SenderId.OpenId
 	}
+	agentUserID := p.resolveAgentUserID(userID)
 	// userName and chatName are resolved in dispatchMessage to avoid blocking
 	// the SDK dispatcher goroutine with synchronous HTTP calls.
 
@@ -833,7 +835,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	// blocked by IO-heavy operations (image/audio download, handler HTTP calls).
 	// The dedup and old-message checks above remain synchronous to guarantee
 	// correctness before spawning the goroutine.
-	go p.dispatchMessage(ctx, msgType, content, mentions, messageID, sessionKey, userID, chatID, rctx, parentID)
+	go p.dispatchMessage(ctx, msgType, content, mentions, messageID, sessionKey, userID, agentUserID, chatID, rctx, parentID)
 
 	return nil
 }
@@ -841,7 +843,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 // dispatchMessage handles the message content parsing, media download, and
 // handler invocation. It runs in its own goroutine so that onMessage returns
 // quickly and does not block the SDK event loop.
-func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string, mentions []*larkim.MentionEvent, messageID, sessionKey, userID, chatID string, rctx replyContext, parentID string) {
+func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string, mentions []*larkim.MentionEvent, messageID, sessionKey, userID, agentUserID, chatID string, rctx replyContext, parentID string) {
 	// Resolve user and chat names asynchronously so SDK dispatcher is not blocked.
 	userName := ""
 	if userID != "" {
@@ -877,7 +879,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		p.handler(p.dispatchPlatform(), &core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
-			UserID:    userID, UserName: userName, ChatName: chatName,
+			UserID:    userID, AgentUserID: agentUserID, UserName: userName, ChatName: chatName,
 			Content: text, ExtraContent: quotedPrefix, ReplyCtx: rctx,
 		})
 
@@ -897,7 +899,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		p.handler(p.dispatchPlatform(), &core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
-			UserID:    userID, UserName: userName, ChatName: chatName,
+			UserID:    userID, AgentUserID: agentUserID, UserName: userName, ChatName: chatName,
 			Images:   []core.ImageAttachment{{MimeType: mimeType, Data: imgData}},
 			ReplyCtx: rctx,
 		})
@@ -920,7 +922,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		p.handler(p.dispatchPlatform(), &core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
-			UserID:    userID, UserName: userName, ChatName: chatName,
+			UserID:    userID, AgentUserID: agentUserID, UserName: userName, ChatName: chatName,
 			Audio: &core.AudioAttachment{
 				MimeType: "audio/opus",
 				Data:     audioData,
@@ -939,7 +941,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		p.handler(p.dispatchPlatform(), &core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
-			UserID:    userID, UserName: userName, ChatName: chatName,
+			UserID:    userID, AgentUserID: agentUserID, UserName: userName, ChatName: chatName,
 			Content: text, ExtraContent: quotedPrefix, Images: images,
 			ReplyCtx: rctx,
 		})
@@ -964,7 +966,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		p.handler(p.dispatchPlatform(), &core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
-			UserID:    userID, UserName: userName, ChatName: chatName,
+			UserID:    userID, AgentUserID: agentUserID, UserName: userName, ChatName: chatName,
 			Files: []core.FileAttachment{{
 				MimeType: mimeType,
 				Data:     fileData,
@@ -982,7 +984,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		coreMsg := &core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
-			UserID:    userID, UserName: userName, ChatName: chatName,
+			UserID:    userID, AgentUserID: agentUserID, UserName: userName, ChatName: chatName,
 			Content:  text,
 			Images:   images,
 			Files:    files,
@@ -1015,7 +1017,41 @@ func (p *Platform) resolveUserName(openID string) string {
 	}
 	name := *resp.Data.User.Name
 	p.userNameCache.Store(openID, name)
+	if resp.Data.User.UserId != nil && strings.TrimSpace(*resp.Data.User.UserId) != "" {
+		p.userIDCache.Store(openID, strings.TrimSpace(*resp.Data.User.UserId))
+	}
 	return name
+}
+
+func (p *Platform) resolveAgentUserID(openID string) string {
+	openID = strings.TrimSpace(openID)
+	if openID == "" {
+		return ""
+	}
+	if cached, ok := p.userIDCache.Load(openID); ok {
+		if userID, ok := cached.(string); ok && strings.TrimSpace(userID) != "" {
+			return userID
+		}
+	}
+	resp, err := p.client.Contact.User.Get(context.Background(),
+		larkcontact.NewGetUserReqBuilder().
+			UserId(openID).
+			UserIdType("open_id").
+			Build())
+	if err != nil {
+		slog.Debug(p.tag()+": resolve user_id failed", "open_id", openID, "error", err)
+		return openID
+	}
+	if !resp.Success() || resp.Data == nil || resp.Data.User == nil || resp.Data.User.UserId == nil {
+		slog.Debug(p.tag()+": resolve user_id: no data", "open_id", openID, "code", resp.Code)
+		return openID
+	}
+	userID := strings.TrimSpace(*resp.Data.User.UserId)
+	if userID == "" {
+		return openID
+	}
+	p.userIDCache.Store(openID, userID)
+	return userID
 }
 
 // resolveUserNames batch-resolves open_ids to display names.
